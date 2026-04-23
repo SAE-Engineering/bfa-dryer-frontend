@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: bfa-hmi-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PLC_HOST=${PLC_HOST:-192.168.1.100}
+      - PLC_PORT=${PLC_PORT:-502}
+      - MODBUS_UNIT_ID=${MODBUS_UNIT_ID:-1}
+      - DEBUG=${DEBUG:-false}
+    volumes:
+      - ./backend:/app
+    restart: unless-stopped
+    networks:
+      - bfa-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: bfa-hmi-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - bfa-network
+
+networks:
+  bfa-network:
+    driver: bridge
