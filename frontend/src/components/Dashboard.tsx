@@ -65,11 +65,11 @@ export const Dashboard = () => {
                   : 'text-gray-400 hover:text-gray-200'
               }`}
               style={{
-                fontSize: '24px',
-                padding: '12px 38px',
-                borderRadius: '9px',
+                fontSize: '32px',
+                padding: '18px 56px',
+                borderRadius: '12px',
                 border: on ? '1px solid rgba(255,255,255,0.12)' : '1px solid transparent',
-                minHeight: '64px',
+                minHeight: '88px',
                 letterSpacing: '0.02em',
               }}
               aria-pressed={on}
@@ -78,7 +78,7 @@ export const Dashboard = () => {
               {count > 0 && (
                 <span
                   className="ml-2 font-mono text-emerald-400"
-                  style={{ fontSize: '18px' }}
+                  style={{ fontSize: '24px' }}
                 >
                   {count}
                 </span>

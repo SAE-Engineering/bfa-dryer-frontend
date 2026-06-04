@@ -8,6 +8,7 @@ export interface Component {
   label: string
   kind: ComponentKind
   has_speed: boolean
+  manual: boolean     // false → indicator only (no operator toggle)
   cmd: boolean
   running: boolean
   fault: boolean

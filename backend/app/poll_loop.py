@@ -118,6 +118,7 @@ async def _build_state(client, settings) -> dict:
             "label":     comp.label,
             "kind":      comp.kind,
             "has_speed": comp.has_speed,
+            "manual":    comp.manual,
             "cmd":       cmd,
             "running":   running,
             "fault":     fault,

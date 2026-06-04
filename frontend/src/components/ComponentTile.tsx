@@ -13,7 +13,7 @@ interface ComponentTileProps {
 
 export const ComponentTile = ({ component }: ComponentTileProps) => {
   const setComponentCmd = useControlStore((s) => s.setComponentCmd)
-  const { id, label, has_speed, cmd, running, fault, speed_pct } = component
+  const { id, label, has_speed, manual, cmd, running, fault, speed_pct } = component
 
   const [localSpeed, setLocalSpeed] = useState(speed_pct)
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -85,22 +85,42 @@ export const ComponentTile = ({ component }: ComponentTileProps) => {
         </div>
       </div>
 
-      {/* Toggle switch row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '22px' }}>
-        <button
-          onClick={handleToggle}
-          aria-pressed={cmd}
-          aria-label={`${label} ${cmd ? 'ON' : 'OFF'}`}
-          className="hmi-toggle"
-          data-on={cmd ? 'true' : 'false'}
-        />
-        <span style={{
-          fontSize: '26px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
-          color: cmd ? '#6ee7b7' : '#6b7280', userSelect: 'none',
-        }}>
-          {cmd ? 'RUN' : 'STOP'}
-        </span>
-      </div>
+      {/* Control row — operator toggle (manual) OR read-only status pill (indicator) */}
+      {manual ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '22px' }}>
+          <button
+            onClick={handleToggle}
+            aria-pressed={cmd}
+            aria-label={`${label} ${cmd ? 'ON' : 'OFF'}`}
+            className="hmi-toggle"
+            data-on={cmd ? 'true' : 'false'}
+          />
+          <span style={{
+            fontSize: '26px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+            color: cmd ? '#6ee7b7' : '#6b7280', userSelect: 'none',
+          }}>
+            {cmd ? 'RUN' : 'STOP'}
+          </span>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
+          <span style={{
+            fontSize: '40px', fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase',
+            color: running ? '#34d399' : '#6b7280', userSelect: 'none', lineHeight: 1,
+            padding: '14px 30px', borderRadius: '14px',
+            background: running ? 'rgba(16,185,129,0.12)' : 'rgba(107,114,128,0.10)',
+            border: `2px solid ${running ? '#059669' : '#374151'}`,
+          }}>
+            {running ? 'ON' : 'OFF'}
+          </span>
+          <span style={{
+            fontSize: '15px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: '#6b7280', userSelect: 'none',
+          }}>
+            Auto · indication only
+          </span>
+        </div>
+      )}
 
       {/* Speed section — VSD only */}
       {has_speed && (

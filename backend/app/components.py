@@ -30,6 +30,7 @@ class Component:
     status_bit: int     # bit in %MW20
     speed_sp_reg: Optional[int] = None   # %MW address
     speed_act_reg: Optional[int] = None  # %MW address
+    manual: bool = True                  # False → indicator only (no operator toggle)
 
 
 # Order matches HMI_CONTRACT.md — do NOT reorder; bit positions are load-bearing.
@@ -46,7 +47,7 @@ COMPONENTS: list[Component] = [
     Component("shaker",     "Shaker",               "dol",    False, 9,  9,  None, None),
     Component("brush",      "Brush",                "dol",    False, 10, 10, None, None),
     Component("burner",     "Burner (enable/low)",  "burner", False, 11, 11, None, None),
-    Component("burner_high","Burner High",          "burner", False, 12, 12, None, None),
+    Component("burner_high","Burner High",          "burner", False, 12, 12, None, None, manual=False),
 ]
 
 # Lookup by id
