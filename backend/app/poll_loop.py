@@ -36,6 +36,7 @@ from app.components import (
     REG_TEMP_BASE,
     BIT_FAN_PROVEN,
     BIT_SAFETY_OK,
+    SETPOINT_REG_MAP,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,6 +130,17 @@ async def _build_state(client, settings) -> dict:
         raw = temps_raw.get(reg, 0)
         temps[key] = round(raw / 10.0, 1)
 
+    # Read operator setpoint registers (%MW8, %MW9, %MW10)
+    sp_reg_addrs = list(SETPOINT_REG_MAP.values())  # [8, 9, 10]
+    sp_regs_raw = await client.read_holding_registers(min(sp_reg_addrs), len(sp_reg_addrs))
+    setpoints: dict[str, float] = {}
+    base = min(sp_reg_addrs)
+    for key, reg in SETPOINT_REG_MAP.items():
+        if sp_regs_raw and (reg - base) < len(sp_regs_raw):
+            setpoints[key] = round(sp_regs_raw[reg - base] / 10.0, 1)
+        else:
+            setpoints[key] = 0.0
+
     return {
         "type":       "state",
         "ts":         datetime.now(timezone.utc).isoformat(),
@@ -138,4 +150,5 @@ async def _build_state(client, settings) -> dict:
         "fan_proven": fan_proven,
         "components": components,
         "temps":      temps,
+        "setpoints":  setpoints,
     }

@@ -5,6 +5,7 @@ import {
   CommandRequest,
   SpeedRequest,
   BurnerSetpointRequest,
+  SetpointRequest,
   HealthResponse,
   DryerState,
 } from '../types'
@@ -38,6 +39,9 @@ export const api = {
 
   setBurnerSetpoint: (req: BurnerSetpointRequest) =>
     post<{ ok: boolean }>('/api/burner_setpoint', req),
+
+  setSetpoint: (req: SetpointRequest) =>
+    post<{ ok: boolean; key: string; value_c: number; raw: number }>('/api/setpoint', req),
 
   getState: () => get<DryerState>('/api/state'),
 

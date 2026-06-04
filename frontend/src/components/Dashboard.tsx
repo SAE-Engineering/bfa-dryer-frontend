@@ -43,8 +43,8 @@ export const Dashboard = () => {
     <div className="flex flex-col h-full overflow-hidden" style={{ gap: '12px', padding: '12px 16px' }}>
 
       {/* Temperatures — fixed height, always visible */}
-      <div className="shrink-0" style={{ height: '180px' }}>
-        <TempPanel temps={dryer.temps} />
+      <div className="shrink-0" style={{ height: '210px' }}>
+        <TempPanel temps={dryer.temps} setpoints={dryer.setpoints} />
       </div>
 
       {/* Segmented tab control */}

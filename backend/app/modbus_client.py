@@ -24,6 +24,8 @@ import time
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
+from app.components import SP_DEFAULTS, SETPOINT_REG_MAP
+
 logger = logging.getLogger(__name__)
 
 
@@ -211,6 +213,10 @@ class SimulatedPlcClient:
 
         # Lag buffer for product2 (uses a short history of product1)
         self._prod1_history: list[float] = [25.0] * 10
+
+        # Seed setpoint registers with defaults
+        for key, reg in SETPOINT_REG_MAP.items():
+            self._regs[reg] = int(SP_DEFAULTS[key] * 10)
 
         # Commanded bits that are "pending" — reflected after ~1 s delay
         # _pending[bit] = (target_value, apply_at_monotonic)

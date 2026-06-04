@@ -7,7 +7,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from app.components import COMPONENT_MAP, REG_CMD_WORD, REG_BURNER_SP
+from app.components import COMPONENT_MAP, REG_CMD_WORD, REG_BURNER_SP, SETPOINT_REG_MAP
 from app.modbus_client import ModbusClient, SimulatedPlcClient
 from app.websocket_handler import setup_websocket, manager
 from app.poll_loop import poll_loop, get_latest_state
@@ -75,11 +75,6 @@ app.add_middleware(
 
 setup_websocket(app)
 
-# Serve the built React frontend if it exists
-frontend_path = Path(__file__).parent.parent / "frontend" / "dist"
-if frontend_path.exists():
-    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
-
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -97,6 +92,11 @@ class SpeedRequest(BaseModel):
 
 class BurnerSetpointRequest(BaseModel):
     celsius: float = Field(ge=0.0, le=1200.0)
+
+
+class SetpointRequest(BaseModel):
+    key: str
+    value_c: float
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +159,36 @@ async def burner_setpoint(req: BurnerSetpointRequest):
         raise HTTPException(status_code=502, detail="Modbus write failed")
 
     return {"ok": True, "celsius": req.celsius, "raw": raw}
+
+
+@app.post("/api/setpoint")
+async def set_operator_setpoint(req: SetpointRequest):
+    """Write an operator temperature setpoint to the matching holding register.
+
+    key ∈ {"burner_hi_lo", "burner_lo_off", "product_max"}
+    value_c in °C — stored as °C×10 in the register, clamped 0..2000.
+    """
+    reg = SETPOINT_REG_MAP.get(req.key)
+    if reg is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown setpoint key {req.key!r}. Valid keys: {list(SETPOINT_REG_MAP)}",
+        )
+    raw = int(max(0, min(2000, round(req.value_c * 10))))
+    ok = await plc_client.write_register(reg, raw)
+    if not ok:
+        raise HTTPException(status_code=502, detail="Modbus write failed")
+
+    return {"ok": True, "key": req.key, "value_c": round(raw / 10.0, 1), "raw": raw}
+
+
+# Serve the built React frontend if it exists.
+# MUST be mounted AFTER all @app.get / @app.post route definitions so
+# FastAPI's router matches API paths first; the "/" catch-all only fires
+# for anything that doesn't match an API or WS route.
+frontend_path = Path(__file__).parent.parent / "frontend" / "dist"
+if frontend_path.exists():
+    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
 
 
 if __name__ == "__main__":

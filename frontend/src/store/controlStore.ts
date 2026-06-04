@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { DryerState, Component, Temps } from '../types'
+import { DryerState, Component, Temps, Setpoints } from '../types'
 
 // Default / null state shown while connecting
 const DEFAULT_TEMPS: Temps = {
@@ -8,6 +8,12 @@ const DEFAULT_TEMPS: Temps = {
   product1: 0,
   product2: 0,
   exhaust: 0,
+}
+
+const DEFAULT_SETPOINTS: Setpoints = {
+  burner_hi_lo: 85.0,
+  burner_lo_off: 96.0,
+  product_max: 92.0,
 }
 
 const DEFAULT_STATE: DryerState = {
@@ -19,6 +25,7 @@ const DEFAULT_STATE: DryerState = {
   fan_proven: false,
   components: [],
   temps: DEFAULT_TEMPS,
+  setpoints: DEFAULT_SETPOINTS,
 }
 
 interface StoreState {

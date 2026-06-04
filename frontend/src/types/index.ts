@@ -22,6 +22,12 @@ export interface Temps {
   exhaust: number
 }
 
+export interface Setpoints {
+  burner_hi_lo: number
+  burner_lo_off: number
+  product_max: number
+}
+
 export interface DryerState {
   type: 'state'
   ts: string
@@ -31,6 +37,7 @@ export interface DryerState {
   fan_proven: boolean
   components: Component[]
   temps: Temps
+  setpoints: Setpoints
 }
 
 // REST request / response shapes
@@ -47,6 +54,11 @@ export interface SpeedRequest {
 
 export interface BurnerSetpointRequest {
   celsius: number
+}
+
+export interface SetpointRequest {
+  key: string
+  value_c: number
 }
 
 export interface HealthResponse {

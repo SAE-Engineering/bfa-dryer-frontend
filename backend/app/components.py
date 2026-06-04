@@ -69,5 +69,24 @@ REG_SPEED_ACT_BASE = 22  # %MW22..%MW27 (hot_fan..trace_chain)
 REG_TEMP_BASE      = 30  # %MW30..%MW34
 REG_BURNER_SP      = 7   # %MW7  — burner setpoint °C × 10
 
+# Operator temperature setpoints (°C × 10)
+REG_SP_BURNER_HI_LO = 8   # %MW8  — burner HIGH→LOW threshold (default 85.0 °C)
+REG_SP_BURNER_LO_OFF = 9  # %MW9  — burner LOW→OFF threshold (default 96.0 °C)
+REG_SP_PRODUCT_MAX   = 10 # %MW10 — product MAX cutout (default 92.0 °C)
+
+# Default setpoint values (°C) — used to seed the sim register bank
+SP_DEFAULTS = {
+    "burner_hi_lo": 85.0,
+    "burner_lo_off": 96.0,
+    "product_max":   92.0,
+}
+
+# Key → register address mapping (for REST handler)
+SETPOINT_REG_MAP: dict[str, int] = {
+    "burner_hi_lo": REG_SP_BURNER_HI_LO,
+    "burner_lo_off": REG_SP_BURNER_LO_OFF,
+    "product_max":   REG_SP_PRODUCT_MAX,
+}
+
 BIT_FAN_PROVEN = 13   # bit 13 in %MW20
 BIT_SAFETY_OK  = 14   # bit 14 in %MW20
