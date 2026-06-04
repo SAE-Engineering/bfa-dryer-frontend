@@ -1,7 +1,7 @@
 // Paged dashboard for the 10.1" FA1019 touch panel.
 // Persistent: status bar (in App) + temperatures row (always visible).
-// Below: big touch tabs — Heating / Feed / Discharge — each group on its OWN page,
-// tiles laid out in a grid that fills the page (no scroll, no clipping).
+// Below: segmented tabs — Heating / Feed / Discharge — each group on its OWN page.
+// Cards are fixed-width, content-height, top-left aligned. Blank space is fine.
 // Group mapping per HMI_CONTRACT.md.
 
 import { useState } from 'react'
@@ -38,18 +38,17 @@ export const Dashboard = () => {
 
   const page = PAGES.find((p) => p.key === active) ?? PAGES[0]
   const tiles = pick(dryer.components, page.ids)
-  // up to 3 columns; rows auto-sized equal so tiles fill the page
-  const cols = Math.min(3, Math.max(1, tiles.length === 4 ? 2 : tiles.length < 3 ? tiles.length : 3))
 
   return (
-    <div className="flex flex-col h-full overflow-hidden" style={{ gap: '0.6vh', padding: '0.5vh 0.75vw' }}>
-      {/* Temperatures — always visible */}
-      <div style={{ flex: '0 0 20%', minHeight: 0 }}>
+    <div className="flex flex-col h-full overflow-hidden" style={{ gap: '12px', padding: '12px 16px' }}>
+
+      {/* Temperatures — fixed height, always visible */}
+      <div className="shrink-0" style={{ height: '120px' }}>
         <TempPanel temps={dryer.temps} />
       </div>
 
-      {/* Page tabs — big touch targets */}
-      <div className="flex shrink-0" style={{ gap: '0.6vw', height: 'clamp(54px, 8vh, 84px)' }}>
+      {/* Segmented tab control */}
+      <div className="shrink-0 flex" style={{ gap: '4px', padding: '3px', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.07)', width: 'fit-content' }}>
         {PAGES.map((p) => {
           const on = p.key === active
           const count = pick(dryer.components, p.ids).filter((c) => c.running).length
@@ -57,36 +56,39 @@ export const Dashboard = () => {
             <button
               key={p.key}
               onClick={() => setActive(p.key)}
-              className={`flex-1 rounded-lg font-black tracking-wide transition-colors select-none touch-none border-2 ${
+              className={`transition-all select-none touch-none font-semibold ${
                 on
-                  ? 'bg-emerald-600 border-emerald-400 text-white'
-                  : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'
+                  ? 'bg-gray-700 text-gray-100 shadow-sm'
+                  : 'text-gray-400 hover:text-gray-200'
               }`}
-              style={{ fontSize: 'clamp(18px, 2.4vh, 30px)' }}
+              style={{
+                fontSize: '15px',
+                padding: '7px 22px',
+                borderRadius: '7px',
+                border: on ? '1px solid rgba(255,255,255,0.12)' : '1px solid transparent',
+                minHeight: '38px',
+                letterSpacing: '0.02em',
+              }}
               aria-pressed={on}
             >
               {p.title}
-              <span
-                className={`ml-2 font-mono ${on ? 'text-emerald-100' : 'text-emerald-400'}`}
-                style={{ fontSize: 'clamp(13px, 1.6vh, 20px)' }}
-              >
-                {count}▶
-              </span>
+              {count > 0 && (
+                <span
+                  className="ml-2 font-mono text-emerald-400"
+                  style={{ fontSize: '12px' }}
+                >
+                  {count}
+                </span>
+              )}
             </button>
           )
         })}
       </div>
 
-      {/* Active group — grid fills the rest */}
+      {/* Component cards — fixed size, flex-wrap, top-left, blank space is fine */}
       <div
-        className="grid overflow-hidden"
-        style={{
-          flex: '1 1 0',
-          minHeight: 0,
-          gap: '0.8vh 0.8vw',
-          gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-          gridAutoRows: 'minmax(0, 1fr)',
-        }}
+        className="flex flex-wrap content-start overflow-y-auto"
+        style={{ gap: '14px', flex: '1 1 0', minHeight: 0 }}
       >
         {tiles.map((c) => (
           <ComponentTile key={c.id} component={c} />

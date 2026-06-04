@@ -13,25 +13,151 @@ html, body {
   @apply h-screen w-screen overflow-hidden;
 }
 
-/*
- * HMI range slider (.hmi-slider)
- * Target: Lilliput FA1019 1920×1200 @224 PPI.
- * Fingertip ≈ 90 CSS px → thumb 52×52 px, track 44 px tall.
- * The wrapper input must carry class="hmi-slider".
+/* ─── HMI Toggle Switch (.hmi-toggle) ──────────────────────────────────────
+ * Sliding pill toggle: track 72×36px, knob 28×28px.
+ * Touch-friendly (36px tall) but visually restrained — not a block button.
+ * data-on="true" → emerald; data-on="false" → gray.
+ */
+
+.hmi-toggle {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  display: inline-block;
+  width: 72px;
+  height: 36px;
+  border-radius: 18px;
+  cursor: pointer;
+  border: 1.5px solid #374151;   /* gray-700 */
+  background: #1f2937;            /* gray-800 — off state */
+  flex-shrink: 0;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+  touch-action: manipulation;
+  outline: none;
+}
+
+/* The sliding knob — pure CSS via ::before */
+.hmi-toggle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #6b7280;            /* gray-500 — off */
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+}
+
+/* ON state */
+.hmi-toggle[data-on="true"] {
+  background: #064e3b;            /* emerald-950 */
+  border-color: #059669;          /* emerald-600 */
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+}
+
+.hmi-toggle[data-on="true"]::before {
+  transform: translateY(-50%) translateX(36px);
+  background: #10b981;            /* emerald-500 */
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+/* Hover / active states */
+.hmi-toggle:hover {
+  border-color: #4b5563;
+}
+
+.hmi-toggle[data-on="true"]:hover {
+  border-color: #34d399;
+}
+
+.hmi-toggle:active::before {
+  width: 30px;  /* thumb stretches slightly on press — subtle physical feel */
+}
+
+/* ─── HMI Slim Range Slider (.hmi-slider-slim) ─────────────────────────────
+ * For VSD speed control inside a component card.
+ * Track: 6px tall, rounded. Thumb: 28×28px circle — touch-friendly, not chunky.
+ */
+
+.hmi-slider-slim {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  padding-block: 6px;   /* vertical hit area enlargement */
+  width: 100%;
+  cursor: pointer;
+}
+
+/* WebKit / Blink (Chromium kiosk) */
+.hmi-slider-slim::-webkit-slider-runnable-track {
+  background: #374151;            /* gray-700 */
+  border-radius: 999px;
+  height: 6px;
+}
+
+.hmi-slider-slim::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  background: #10b981;            /* emerald-500 */
+  border: 2px solid #6ee7b7;     /* emerald-300 */
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  margin-top: calc((6px - 28px) / 2);
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+  transition: background 0.15s;
+}
+
+.hmi-slider-slim::-webkit-slider-thumb:hover {
+  background: #34d399;            /* emerald-400 */
+}
+
+.hmi-slider-slim::-webkit-slider-thumb:active {
+  background: #6ee7b7;            /* emerald-300 */
+  box-shadow: 0 0 10px rgba(110, 231, 183, 0.8);
+}
+
+/* Gecko (Firefox) */
+.hmi-slider-slim::-moz-range-track {
+  background: #374151;
+  border-radius: 999px;
+  height: 6px;
+  border: none;
+}
+
+.hmi-slider-slim::-moz-range-thumb {
+  background: #10b981;
+  border: 2px solid #6ee7b7;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+  transition: background 0.15s;
+}
+
+.hmi-slider-slim::-moz-range-thumb:hover {
+  background: #34d399;
+}
+
+/* ─── Legacy .hmi-slider — kept for any remaining references ────────────────
+ * (No longer used in component tiles — kept to avoid orphan-class build errors)
  */
 
 .hmi-slider {
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
-  /* vertical centering — thumb overflows track, so give some room */
   padding-block: 4px;
   width: 100%;
 }
 
-/* WebKit / Blink (Chrome, Chromium kiosk) */
 .hmi-slider::-webkit-slider-runnable-track {
-  background: #374151; /* gray-700 */
+  background: #374151;
   border-radius: 999px;
   height: 44px;
 }
@@ -39,28 +165,17 @@ html, body {
 .hmi-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  background: #10b981; /* emerald-500 */
-  border: 3px solid #6ee7b7; /* emerald-300 */
+  background: #10b981;
+  border: 3px solid #6ee7b7;
   border-radius: 50%;
   width: 52px;
   height: 52px;
-  /* Centre thumb on 44px track */
   margin-top: calc((44px - 52px) / 2);
   cursor: pointer;
   box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
   transition: background 0.15s;
 }
 
-.hmi-slider::-webkit-slider-thumb:hover {
-  background: #34d399; /* emerald-400 */
-}
-
-.hmi-slider::-webkit-slider-thumb:active {
-  background: #6ee7b7; /* emerald-300 */
-  box-shadow: 0 0 14px rgba(110, 231, 183, 0.9);
-}
-
-/* Gecko (Firefox) */
 .hmi-slider::-moz-range-track {
   background: #374151;
   border-radius: 999px;
@@ -77,8 +192,4 @@ html, body {
   cursor: pointer;
   box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
   transition: background 0.15s;
-}
-
-.hmi-slider::-moz-range-thumb:hover {
-  background: #34d399;
 }

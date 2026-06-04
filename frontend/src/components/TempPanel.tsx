@@ -1,5 +1,5 @@
-// Temperature panel — 5 readouts in °C to 1 decimal.
-// Fills its row completely. Values are large enough to read from several metres.
+// Temperature panel — 4 readouts in °C to 1 decimal.
+// Fixed height set by Dashboard (120px). Values large enough to read across the room.
 // Colour cues: warm (>80°C) → amber, hot (>150°C) → red.
 
 import { Temps } from '../types'
@@ -10,51 +10,71 @@ interface TempCardProps {
 }
 
 const TempCard = ({ label, value }: TempCardProps) => {
-  let borderClass = 'border-gray-700'
-  let bgClass = 'bg-gray-800'
-  let labelClass = 'text-gray-400'
-  let valueClass = 'text-gray-50'
-  let unitClass = 'text-gray-400'
+  let borderColor = '#1f2937'    // gray-800
+  let bgColor = '#111827'        // gray-900
+  let labelColor = '#6b7280'     // gray-500
+  let valueColor = '#f9fafb'     // gray-50
+  let unitColor = '#9ca3af'      // gray-400
 
   if (value > 150) {
-    borderClass = 'border-red-600'
-    bgClass = 'bg-red-950'
-    labelClass = 'text-red-300'
-    valueClass = 'text-red-200'
-    unitClass = 'text-red-400'
+    borderColor = '#dc2626'      // red-600
+    bgColor = '#1a0505'
+    labelColor = '#fca5a5'       // red-300
+    valueColor = '#fecaca'       // red-200
+    unitColor = '#f87171'        // red-400
   } else if (value > 80) {
-    borderClass = 'border-amber-600'
-    bgClass = 'bg-amber-950'
-    labelClass = 'text-amber-300'
-    valueClass = 'text-amber-100'
-    unitClass = 'text-amber-400'
+    borderColor = '#d97706'      // amber-600
+    bgColor = '#1a0e00'
+    labelColor = '#fcd34d'       // amber-300
+    valueColor = '#fef3c7'       // amber-100
+    unitColor = '#fbbf24'        // amber-400
   }
 
   return (
     <div
-      className={`flex flex-col justify-between rounded-xl border-2 ${borderClass} ${bgClass} overflow-hidden`}
-      style={{ padding: '1.2vh 1.2vw', height: '100%' }}
+      style={{
+        flex: 1,
+        minWidth: 0,
+        background: bgColor,
+        border: `1px solid ${borderColor}`,
+        borderRadius: '10px',
+        padding: '10px 14px',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        height: '100%',
+        boxSizing: 'border-box',
+      }}
     >
       {/* Label */}
-      <span
-        className={`font-bold uppercase tracking-widest leading-tight ${labelClass}`}
-        style={{ fontSize: 'clamp(14px, 1.3vh, 20px)' }}
-      >
+      <span style={{
+        fontSize: '11px',
+        fontWeight: 700,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        color: labelColor,
+        lineHeight: 1,
+      }}>
         {label}
       </span>
 
-      {/* Value */}
-      <div className="flex items-baseline gap-1 mt-auto">
-        <span
-          className={`font-black font-mono tabular-nums leading-none ${valueClass}`}
-          style={{ fontSize: 'clamp(36px, 5.5vh, 72px)' }}
-        >
+      {/* Value + unit */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px', marginTop: 'auto' }}>
+        <span style={{
+          fontFamily: 'monospace',
+          fontWeight: 900,
+          fontSize: '38px',
+          lineHeight: 1,
+          color: valueColor,
+          fontVariantNumeric: 'tabular-nums',
+        }}>
           {value.toFixed(1)}
         </span>
-        <span
-          className={`font-bold ${unitClass}`}
-          style={{ fontSize: 'clamp(18px, 2.5vh, 32px)' }}
-        >
+        <span style={{
+          fontWeight: 700,
+          fontSize: '20px',
+          color: unitColor,
+        }}>
           °C
         </span>
       </div>
@@ -68,31 +88,35 @@ interface TempPanelProps {
 
 export const TempPanel = ({ temps }: TempPanelProps) => {
   return (
-    // Fills its container height entirely — flex children fill vertically
-    <div className="h-full flex flex-col overflow-hidden bg-gray-900 rounded-xl border border-gray-700"
-         style={{ padding: '1vh 1vw' }}>
+    <div style={{
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      background: '#0d1117',
+      borderRadius: '12px',
+      border: '1px solid #1f2937',
+      padding: '10px 14px',
+      gap: '8px',
+      boxSizing: 'border-box',
+    }}>
       {/* Section label */}
-      <div
-        className="font-bold uppercase tracking-widest text-gray-500 shrink-0"
-        style={{ fontSize: 'clamp(11px, 1.1vh, 15px)', marginBottom: '0.7vh' }}
-      >
+      <div style={{
+        fontSize: '10px',
+        fontWeight: 700,
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase',
+        color: '#4b5563',
+        flexShrink: 0,
+      }}>
         Temperatures
       </div>
 
-      {/* Operator-facing temps (Hot Fan motor temp is the ACS355's own trip — not shown here) */}
-      <div className="flex gap-x-[0.75vw] flex-1 min-h-0">
-        <div className="flex-1 min-w-0">
-          <TempCard label="Burner" value={temps.burner} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <TempCard label="Product 1" value={temps.product1} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <TempCard label="Product 2" value={temps.product2} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <TempCard label="Exhaust" value={temps.exhaust} />
-        </div>
+      {/* Four temp cards in a row */}
+      <div style={{ display: 'flex', gap: '10px', flex: 1, minHeight: 0 }}>
+        <TempCard label="Burner" value={temps.burner} />
+        <TempCard label="Product 1" value={temps.product1} />
+        <TempCard label="Product 2" value={temps.product2} />
+        <TempCard label="Exhaust" value={temps.exhaust} />
       </div>
     </div>
   )

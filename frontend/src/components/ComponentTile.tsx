@@ -1,6 +1,7 @@
-// Single component tile: label, ON/OFF toggle, running LED, fault indicator.
-// For has_speed components: speed slider (debounced 300ms) + actual speed readout.
-// Designed for Lilliput FA1019 1920×1200 @224 PPI — all touch targets ≥ 90×56 px.
+// Single component tile: label, running LED, ON/OFF toggle switch, fault indicator.
+// For has_speed components: slim speed slider + actual/SP readout.
+// Cards are fixed-width, content-height — they do NOT stretch to fill the page.
+// Touch targets: toggle track 72×36px, slider thumb 28px — adequate without being chunky.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Component } from '../types'
@@ -51,95 +52,121 @@ export const ComponentTile = ({ component }: ComponentTileProps) => {
     [id]
   )
 
-  // Tile border colour: fault > running > commanded
-  const tileBorder = fault
-    ? 'border-red-600'
+  // Card border: fault > running > commanded > idle
+  const borderColor = fault
+    ? '#dc2626'   // red-600
     : running
-    ? 'border-emerald-600'
+    ? '#059669'   // emerald-600
     : cmd
-    ? 'border-emerald-800'
-    : 'border-gray-700'
+    ? '#065f46'   // emerald-900 faint glow
+    : '#1f2937'   // gray-800
 
-  const tileBg = fault ? 'bg-red-950' : 'bg-gray-900'
-
-  // Toggle button colours
-  const toggleBg = cmd
-    ? 'bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-400 text-white'
-    : 'bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-gray-200'
+  const cardBg = fault ? '#1a0505' : '#111827'  // red-950 tinted vs gray-900
 
   return (
     <div
-      className={`flex flex-col rounded-xl border-2 transition-colors h-full overflow-hidden ${tileBorder} ${tileBg}`}
-      style={{ padding: '0.6vh 0.8vw', gap: '0.5vh' }}
+      style={{
+        width: '280px',
+        background: cardBg,
+        border: `1px solid ${borderColor}`,
+        borderRadius: '12px',
+        padding: '14px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px',
+        boxSizing: 'border-box',
+        // height is content-driven — no min-h, no flex-grow
+      }}
     >
-      {/* Header row: label + running LED + fault badge */}
-      <div className="flex items-center justify-between gap-2 shrink-0">
-        <span
-          className="font-bold text-gray-100 leading-tight"
-          style={{ fontSize: 'clamp(15px, 1.6vh, 22px)' }}
-        >
+      {/* Header: name left, LED + fault badge right */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+        <span style={{
+          fontSize: '16px',
+          fontWeight: 700,
+          color: '#f3f4f6',
+          lineHeight: 1.2,
+          letterSpacing: '0.01em',
+        }}>
           {label}
         </span>
-        <div className="flex items-center gap-2 shrink-0">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
           {fault && (
-            <span
-              className="rounded bg-red-600 text-red-100 font-black uppercase tracking-wide animate-pulse"
-              style={{ fontSize: 'clamp(11px, 1.1vh, 14px)', padding: '2px 6px' }}
-            >
+            <span style={{
+              fontSize: '10px',
+              fontWeight: 900,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              background: '#dc2626',
+              color: '#fee2e2',
+              borderRadius: '4px',
+              padding: '2px 6px',
+              animation: 'pulse 1.5s ease-in-out infinite',
+            }}>
               FAULT
             </span>
           )}
           {/* Running LED */}
           <span
-            className={`inline-block rounded-full border-2 shrink-0 ${
-              running
-                ? 'bg-green-400 border-green-300 shadow-[0_0_8px_rgba(74,222,128,0.8)]'
-                : 'bg-gray-700 border-gray-600'
-            }`}
-            style={{ width: 'clamp(14px, 1.6vh, 20px)', height: 'clamp(14px, 1.6vh, 20px)' }}
+            style={{
+              display: 'inline-block',
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              flexShrink: 0,
+              background: running ? '#4ade80' : '#374151',
+              border: `1.5px solid ${running ? '#86efac' : '#4b5563'}`,
+              boxShadow: running ? '0 0 6px rgba(74,222,128,0.7)' : 'none',
+            }}
             title={running ? 'Running' : 'Stopped'}
           />
         </div>
       </div>
 
-      {/* ON/OFF toggle — minimum 90×56 px hit area on 1920×1200 */}
-      <button
-        onClick={handleToggle}
-        className={`w-full rounded-lg font-black tracking-widest transition-colors select-none touch-none ${toggleBg}`}
-        style={{
-          fontSize: 'clamp(18px, 2.2vh, 28px)',
-          minHeight: '56px',
-          flex: has_speed ? '0 0 auto' : '1 1 0',
-        }}
-        aria-pressed={cmd}
-        aria-label={`${label} ${cmd ? 'ON' : 'OFF'}`}
-      >
-        {cmd ? 'ON' : 'OFF'}
-      </button>
+      {/* Toggle switch row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* The switch itself — clicking the whole row area toggles */}
+        <button
+          onClick={handleToggle}
+          aria-pressed={cmd}
+          aria-label={`${label} ${cmd ? 'ON' : 'OFF'}`}
+          className="hmi-toggle"
+          data-on={cmd ? 'true' : 'false'}
+          style={{
+            // no extra styles — all in CSS
+          }}
+        />
+        <span style={{
+          fontSize: '13px',
+          fontWeight: 600,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: cmd ? '#6ee7b7' : '#6b7280',
+          userSelect: 'none',
+        }}>
+          {cmd ? 'RUN' : 'STOP'}
+        </span>
+      </div>
 
       {/* Speed section — only for VSD components */}
       {has_speed && (
-        <div className="flex flex-col flex-1 min-h-0 justify-evenly" style={{ gap: '0.3vh' }}>
-          {/* Readout row */}
-          <div className="flex justify-between items-baseline shrink-0">
-            <span
-              className="font-bold uppercase tracking-widest text-gray-400"
-              style={{ fontSize: 'clamp(11px, 1.1vh, 14px)' }}
-            >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {/* Readout row: actual speed + setpoint */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#6b7280' }}>
               Speed
             </span>
-            <span
-              className="font-mono font-bold tabular-nums text-gray-100"
-              style={{ fontSize: 'clamp(14px, 1.6vh, 20px)' }}
-            >
-              {speed_pct.toFixed(1)}
-              <span className="text-gray-500 ml-1" style={{ fontSize: 'clamp(11px, 1.1vh, 14px)' }}>
-                % act
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+              <span style={{ fontFamily: 'monospace', fontSize: '14px', fontWeight: 700, color: '#e5e7eb', tabularNums: true } as React.CSSProperties}>
+                {speed_pct.toFixed(1)}
+                <span style={{ fontSize: '10px', color: '#6b7280', marginLeft: '3px' }}>% act</span>
               </span>
-            </span>
+              <span style={{ fontFamily: 'monospace', fontSize: '13px', fontWeight: 700, color: '#34d399' }}>
+                SP {localSpeed.toFixed(0)}%
+              </span>
+            </div>
           </div>
 
-          {/* Slider — track height 44px, thumb 44×44px */}
+          {/* Slim speed slider */}
           <input
             type="range"
             min={0}
@@ -147,17 +174,9 @@ export const ComponentTile = ({ component }: ComponentTileProps) => {
             step={1}
             value={localSpeed}
             onChange={handleSpeedChange}
-            className="w-full hmi-slider cursor-pointer touch-none"
+            className="hmi-slider-slim"
             aria-label={`${label} speed setpoint`}
           />
-
-          {/* Setpoint readout */}
-          <div
-            className="text-right font-mono font-bold tabular-nums text-emerald-400 shrink-0"
-            style={{ fontSize: 'clamp(13px, 1.4vh, 18px)' }}
-          >
-            SP {localSpeed.toFixed(0)}%
-          </div>
         </div>
       )}
     </div>
