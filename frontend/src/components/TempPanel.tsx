@@ -430,8 +430,8 @@ export const TempPanel = ({ temps, setpoints }: TempPanelProps) => {
           Temperatures
         </div>
 
-        {/* Four temp cards in a row */}
-        <div style={{ display: 'flex', gap: '10px', flex: 1, minHeight: 0 }}>
+        {/* Four temp cards stacked vertically */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, minHeight: 0 }}>
           <TempCard
             label="Burner"
             value={temps.burner}

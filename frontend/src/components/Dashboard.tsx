@@ -40,12 +40,15 @@ export const Dashboard = () => {
   const tiles = pick(dryer.components, page.ids)
 
   return (
-    <div className="flex flex-col h-full overflow-hidden" style={{ gap: '12px', padding: '12px 16px' }}>
+    <div className="flex h-full overflow-hidden" style={{ gap: '16px', padding: '12px 16px' }}>
 
-      {/* Temperatures — fixed height, always visible */}
-      <div className="shrink-0" style={{ height: '210px' }}>
+      {/* Temperatures — vertical column down the left */}
+      <div className="shrink-0 h-full" style={{ width: '400px' }}>
         <TempPanel temps={dryer.temps} setpoints={dryer.setpoints} />
       </div>
+
+      {/* Right column: tabs + component cards */}
+      <div className="flex flex-col" style={{ flex: '1 1 0', minHeight: 0, gap: '12px' }}>
 
       {/* Segmented tab control */}
       <div className="shrink-0 flex" style={{ gap: '4px', padding: '3px', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.07)', width: 'fit-content' }}>
@@ -93,6 +96,7 @@ export const Dashboard = () => {
         {tiles.map((c) => (
           <ComponentTile key={c.id} component={c} />
         ))}
+      </div>
       </div>
     </div>
   )
