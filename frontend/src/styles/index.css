@@ -13,41 +13,72 @@ html, body {
   @apply h-screen w-screen overflow-hidden;
 }
 
-/* Range input: uniform appearance across WebKit/Gecko */
-input[type="range"] {
+/*
+ * HMI range slider (.hmi-slider)
+ * Target: Lilliput FA1019 1920×1200 @224 PPI.
+ * Fingertip ≈ 90 CSS px → thumb 52×52 px, track 44 px tall.
+ * The wrapper input must carry class="hmi-slider".
+ */
+
+.hmi-slider {
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
+  /* vertical centering — thumb overflows track, so give some room */
+  padding-block: 4px;
+  width: 100%;
 }
 
-input[type="range"]::-webkit-slider-runnable-track {
-  @apply bg-gray-700 rounded-full;
-  height: 8px;
+/* WebKit / Blink (Chrome, Chromium kiosk) */
+.hmi-slider::-webkit-slider-runnable-track {
+  background: #374151; /* gray-700 */
+  border-radius: 999px;
+  height: 44px;
 }
 
-input[type="range"]::-webkit-slider-thumb {
+.hmi-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  @apply bg-emerald-500 rounded-full;
-  width: 28px;
-  height: 28px;
-  margin-top: -10px;
+  background: #10b981; /* emerald-500 */
+  border: 3px solid #6ee7b7; /* emerald-300 */
+  border-radius: 50%;
+  width: 52px;
+  height: 52px;
+  /* Centre thumb on 44px track */
+  margin-top: calc((44px - 52px) / 2);
   cursor: pointer;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+  transition: background 0.15s;
 }
 
-input[type="range"]::-moz-range-track {
-  @apply bg-gray-700 rounded-full;
-  height: 8px;
+.hmi-slider::-webkit-slider-thumb:hover {
+  background: #34d399; /* emerald-400 */
 }
 
-input[type="range"]::-moz-range-thumb {
-  @apply bg-emerald-500 rounded-full border-0;
-  width: 28px;
-  height: 28px;
+.hmi-slider::-webkit-slider-thumb:active {
+  background: #6ee7b7; /* emerald-300 */
+  box-shadow: 0 0 14px rgba(110, 231, 183, 0.9);
+}
+
+/* Gecko (Firefox) */
+.hmi-slider::-moz-range-track {
+  background: #374151;
+  border-radius: 999px;
+  height: 44px;
+  border: none;
+}
+
+.hmi-slider::-moz-range-thumb {
+  background: #10b981;
+  border: 3px solid #6ee7b7;
+  border-radius: 50%;
+  width: 52px;
+  height: 52px;
   cursor: pointer;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+  transition: background 0.15s;
 }
 
-/* Scrollable main area uses momentum scroll on iOS */
-main {
-  -webkit-overflow-scrolling: touch;
+.hmi-slider::-moz-range-thumb:hover {
+  background: #34d399;
 }

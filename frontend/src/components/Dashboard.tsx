@@ -1,4 +1,6 @@
-// Main dashboard: temperatures + three component groups.
+// Main dashboard: temperatures row + three component group columns.
+// Fills the available height (100% of flex-1 main) — no vertical scroll.
+// Row split: temps ~24%, components ~76%.
 // Group mapping per HMI_CONTRACT.md:
 //   Heating:   hot_fan, burner, burner_high
 //   Feed:      load_conv, spinner, agitator1, agitator2, trace_chain
@@ -26,7 +28,7 @@ export const Dashboard = () => {
 
   if (wsStatus !== 'open' || dryer.components.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64 text-gray-500 text-xl">
+      <div className="flex items-center justify-center h-full text-gray-400 text-2xl font-semibold">
         {wsStatus === 'connecting' ? 'Connecting to backend…' : 'Waiting for state…'}
       </div>
     )
@@ -37,14 +39,27 @@ export const Dashboard = () => {
   const discharge = pick(dryer.components, DISCHARGE_IDS)
 
   return (
-    <div className="flex flex-col gap-4">
-      <TempPanel temps={dryer.temps} />
+    // Fills the full available height, no overflow, no padding that would cause scroll
+    <div className="flex flex-col h-full overflow-hidden" style={{ gap: '0.5vh', padding: '0.5vh 0.75vw' }}>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <ComponentGroup title="Heating" components={heating} />
-        <ComponentGroup title="Feed" components={feed} />
-        <ComponentGroup title="Discharge" components={discharge} />
+      {/* Row 1 — Temperatures: ~24% of available height */}
+      <div style={{ flex: '0 0 23%', minHeight: 0 }}>
+        <TempPanel temps={dryer.temps} />
       </div>
+
+      {/* Row 2 — Component groups: fill rest */}
+      <div className="flex gap-x-[0.75vw] overflow-hidden" style={{ flex: '1 1 0', minHeight: 0 }}>
+        <div className="flex-1 min-w-0 min-h-0">
+          <ComponentGroup title="Heating" components={heating} />
+        </div>
+        <div className="flex-1 min-w-0 min-h-0">
+          <ComponentGroup title="Feed" components={feed} />
+        </div>
+        <div className="flex-1 min-w-0 min-h-0">
+          <ComponentGroup title="Discharge" components={discharge} />
+        </div>
+      </div>
+
     </div>
   )
 }

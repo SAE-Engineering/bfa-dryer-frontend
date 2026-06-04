@@ -1,4 +1,5 @@
 // Group of component tiles with a section heading.
+// Fills the available column height — tiles laid out vertically, evenly distributed.
 
 import { Component } from '../types'
 import { ComponentTile } from './ComponentTile'
@@ -12,11 +13,25 @@ export const ComponentGroup = ({ title, components }: ComponentGroupProps) => {
   if (components.length === 0) return null
 
   return (
-    <div className="bg-gray-900 rounded-xl p-4 border border-gray-700">
-      <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">{title}</h2>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
+    <div className="h-full flex flex-col overflow-hidden bg-gray-900 rounded-xl border border-gray-700"
+         style={{ padding: '1vh 1vw' }}>
+      {/* Column header */}
+      <h2
+        className="font-black uppercase tracking-widest text-gray-300 shrink-0 border-b border-gray-700"
+        style={{ fontSize: 'clamp(13px, 1.4vh, 20px)', paddingBottom: '0.6vh', marginBottom: '0.8vh' }}
+      >
+        {title}
+      </h2>
+
+      {/* Tiles: each tile gets an equal share of remaining column height */}
+      <div
+        className="flex flex-col flex-1 min-h-0"
+        style={{ gap: '0.6vh' }}
+      >
         {components.map((c) => (
-          <ComponentTile key={c.id} component={c} />
+          <div key={c.id} className="flex-1 min-h-0">
+            <ComponentTile component={c} />
+          </div>
         ))}
       </div>
     </div>
