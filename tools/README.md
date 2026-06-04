@@ -41,6 +41,25 @@ The backend re-reads the licence whenever the file mtime changes (within one
 poll, ~0.5 s) — no restart needed. To renew when the customer pays: mint a new
 licence with a later `expires` and scp it over Zerotier.
 
+## Disable the lockout permanently (paid in full)
+
+Mint a **perpetual** licence — never warns, never locks — and push it. Still
+signed and machine-bound, so it is SAE-controlled and works offline forever:
+```bash
+python3 tools/mint_license.py \
+  --customer "Banana Feeds Australia" \
+  --machine-id bfa-hmi-01 \
+  --perpetual --out /tmp/license.json
+
+scp /tmp/license.json bfa-hmi-zt:~/bfa-dryer-frontend/data/license.json
+```
+`GET /api/license` then shows `status: ok`, `message: "Licensed (perpetual)"`,
+`expires: null` — no banner, controls always available.
+
+Blunt alternative (turns the whole mechanism off on the box, not signed):
+set `LICENSE_ENFORCE=false` in the panel `.env` and `docker compose up -d`.
+Prefer the perpetual licence — it keeps the audit trail and stays revocable.
+
 ## Panel config
 - `MACHINE_ID=bfa-hmi-01` in the panel `.env` (must match `--machine-id`).
 - `LICENSE_ENFORCE=true` (default). Set `false` only for a dev box.

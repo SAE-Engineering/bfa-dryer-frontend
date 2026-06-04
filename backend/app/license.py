@@ -175,6 +175,14 @@ class LicenseManager:
                 "Licence is for a different machine — contact SAE Engineering",
             )
 
+        # Perpetual licence — full unlock after payment. Never warns, never locks.
+        # The flag is inside the signed payload, so it cannot be forged.
+        if payload.get("perpetual") is True:
+            return LicenseStatus(
+                "ok", False, customer, self.machine_id, None, None, None,
+                "Licensed (perpetual)",
+            )
+
         try:
             warn = _parse_iso(payload["warn"])
             expires = _parse_iso(payload["expires"])

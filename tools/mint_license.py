@@ -56,11 +56,35 @@ def main() -> None:
     ap.add_argument("--expires-in-days", type=int, help="alt: expiry N days from now")
     ap.add_argument("--warn-before-days", type=int, default=4,
                     help="alt: warn this many days before expiry (default 4)")
+    ap.add_argument("--perpetual", action="store_true",
+                    help="never expires — full unlock after payment received")
     ap.add_argument("--key", default=str(Path.home() / ".claude/secrets/bfa-license-signing.key"))
     ap.add_argument("--out", default="license.json")
     args = ap.parse_args()
 
     now = datetime.now(timezone.utc)
+
+    if args.perpetual:
+        payload = {
+            "customer":   args.customer,
+            "machine_id": args.machine_id,
+            "issued":     now.replace(microsecond=0).isoformat(),
+            "perpetual":  True,
+            "nonce":      secrets.token_hex(8),
+        }
+        priv_b64 = Path(args.key).read_text().strip()
+        priv = Ed25519PrivateKey.from_private_bytes(base64.b64decode(priv_b64))
+        sig = priv.sign(canonical(payload))
+        out = Path(args.out)
+        out.write_text(json.dumps({"payload": payload, "sig": base64.b64encode(sig).decode()}, indent=2) + "\n")
+        os.chmod(out, 0o644)
+        print(f"Wrote {out}  (PERPETUAL — never locks)")
+        print(f"  customer : {payload['customer']}")
+        print(f"  machine  : {payload['machine_id']}")
+        print()
+        print("Install on the panel (over Zerotier):")
+        print(f"  scp {out} bfa-hmi-zt:~/bfa-dryer-frontend/data/license.json")
+        return
 
     if args.expires:
         expires = parse_date(args.expires)
