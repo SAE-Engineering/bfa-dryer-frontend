@@ -30,3 +30,7 @@ npm-debug.log*
 .env
 docker-compose.override.yml
 data/*.csv
+
+# Python bytecode (all levels)
+**/__pycache__/
+**/*.pyc
