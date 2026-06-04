@@ -1,0 +1,42 @@
+#!/bin/sh
+# BFA HMI kiosk session — self-sustained, stay-awake, fullscreen, locked to local HMI.
+# Docker (frontend :80) serves the HMI; browser shows http://localhost/.
+# Fullscreen is owned solely by epiphany F11 (openbox rc: fullscreen=no, maximized).
+# Install to ~/.xinitrc on the panel.
+
+# --- Screen: never blank, no DPMS, no cursor ---
+xset s off
+xset s noblank
+xset -dpms
+unclutter -idle 1 -root &
+
+# --- Session dbus for WebKit child processes ---
+eval "$(dbus-launch --sh-syntax --exit-with-session)"
+export DBUS_SESSION_BUS_ADDRESS DBUS_SESSION_BUS_PID
+
+# --- Window manager ---
+openbox &
+sleep 1
+
+# --- Browser loop: relaunch if it dies; F11 until genuinely fullscreen ---
+KIOSK_URL="http://localhost/"
+while :; do
+    epiphany --incognito-mode "$KIOSK_URL" >/tmp/epiphany.log 2>&1 &
+    EPID=$!
+    (
+      for i in $(seq 1 60); do
+        sleep 1
+        wid=$(xdotool search --onlyvisible --name "BFA Dryer" 2>/dev/null | tail -1)
+        [ -z "$wid" ] && continue
+        if xprop -id "$wid" _NET_WM_STATE 2>/dev/null | grep -q _NET_WM_STATE_FULLSCREEN; then
+            xdotool mousemove 960 1180 2>/dev/null
+            break
+        fi
+        xdotool windowactivate --sync "$wid" 2>/dev/null
+        sleep 0.3
+        xdotool key --clearmodifiers F11 2>/dev/null
+      done
+    ) &
+    wait $EPID
+    sleep 2
+done

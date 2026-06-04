@@ -25,3 +25,8 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Panel/local runtime (env-specific, not for the shared repo)
+.env
+docker-compose.override.yml
+data/*.csv

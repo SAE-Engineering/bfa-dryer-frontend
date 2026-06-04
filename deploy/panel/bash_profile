@@ -1,0 +1,8 @@
+# Auto-start X on tty1 if not already running; self-restart X on crash (kiosk self-heal)
+# Install to ~/.bash_profile on the panel.
+if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ] && [ -z "$SSH_TTY" ]; then
+    while :; do
+        startx -- -nocursor
+        sleep 2
+    done
+fi
