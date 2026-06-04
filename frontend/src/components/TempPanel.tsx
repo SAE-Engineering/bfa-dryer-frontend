@@ -48,7 +48,7 @@ const TempCard = ({ label, value }: TempCardProps) => {
     >
       {/* Label */}
       <span style={{
-        fontSize: '11px',
+        fontSize: '16px',
         fontWeight: 700,
         letterSpacing: '0.08em',
         textTransform: 'uppercase',
@@ -63,7 +63,7 @@ const TempCard = ({ label, value }: TempCardProps) => {
         <span style={{
           fontFamily: 'monospace',
           fontWeight: 900,
-          fontSize: '38px',
+          fontSize: '66px',
           lineHeight: 1,
           color: valueColor,
           fontVariantNumeric: 'tabular-nums',
@@ -72,7 +72,7 @@ const TempCard = ({ label, value }: TempCardProps) => {
         </span>
         <span style={{
           fontWeight: 700,
-          fontSize: '20px',
+          fontSize: '30px',
           color: unitColor,
         }}>
           °C

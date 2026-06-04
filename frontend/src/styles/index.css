@@ -24,11 +24,11 @@ html, body {
   appearance: none;
   position: relative;
   display: inline-block;
-  width: 72px;
-  height: 36px;
-  border-radius: 18px;
+  width: 140px;
+  height: 72px;
+  border-radius: 36px;
   cursor: pointer;
-  border: 1.5px solid #374151;   /* gray-700 */
+  border: 2px solid #374151;   /* gray-700 */
   background: #1f2937;            /* gray-800 — off state */
   flex-shrink: 0;
   transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
@@ -41,10 +41,10 @@ html, body {
   content: '';
   position: absolute;
   top: 50%;
-  left: 4px;
+  left: 6px;
   transform: translateY(-50%);
-  width: 26px;
-  height: 26px;
+  width: 58px;
+  height: 58px;
   border-radius: 50%;
   background: #6b7280;            /* gray-500 — off */
   transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s;
@@ -59,7 +59,7 @@ html, body {
 }
 
 .hmi-toggle[data-on="true"]::before {
-  transform: translateY(-50%) translateX(36px);
+  transform: translateY(-50%) translateX(68px);
   background: #10b981;            /* emerald-500 */
   box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
 }
@@ -74,7 +74,7 @@ html, body {
 }
 
 .hmi-toggle:active::before {
-  width: 30px;  /* thumb stretches slightly on press — subtle physical feel */
+  width: 66px;  /* thumb stretches slightly on press — subtle physical feel */
 }
 
 /* ─── HMI Slim Range Slider (.hmi-slider-slim) ─────────────────────────────
@@ -95,7 +95,7 @@ html, body {
 .hmi-slider-slim::-webkit-slider-runnable-track {
   background: #374151;            /* gray-700 */
   border-radius: 999px;
-  height: 6px;
+  height: 16px;
 }
 
 .hmi-slider-slim::-webkit-slider-thumb {
@@ -104,9 +104,9 @@ html, body {
   background: #10b981;            /* emerald-500 */
   border: 2px solid #6ee7b7;     /* emerald-300 */
   border-radius: 50%;
-  width: 28px;
-  height: 28px;
-  margin-top: calc((6px - 28px) / 2);
+  width: 56px;
+  height: 56px;
+  margin-top: calc((16px - 56px) / 2);
   cursor: pointer;
   box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
   transition: background 0.15s;
@@ -125,7 +125,7 @@ html, body {
 .hmi-slider-slim::-moz-range-track {
   background: #374151;
   border-radius: 999px;
-  height: 6px;
+  height: 16px;
   border: none;
 }
 
@@ -133,8 +133,8 @@ html, body {
   background: #10b981;
   border: 2px solid #6ee7b7;
   border-radius: 50%;
-  width: 28px;
-  height: 28px;
+  width: 56px;
+  height: 56px;
   cursor: pointer;
   box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
   transition: background 0.15s;

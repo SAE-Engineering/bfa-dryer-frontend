@@ -43,7 +43,7 @@ export const Dashboard = () => {
     <div className="flex flex-col h-full overflow-hidden" style={{ gap: '12px', padding: '12px 16px' }}>
 
       {/* Temperatures — fixed height, always visible */}
-      <div className="shrink-0" style={{ height: '120px' }}>
+      <div className="shrink-0" style={{ height: '180px' }}>
         <TempPanel temps={dryer.temps} />
       </div>
 
@@ -62,11 +62,11 @@ export const Dashboard = () => {
                   : 'text-gray-400 hover:text-gray-200'
               }`}
               style={{
-                fontSize: '15px',
-                padding: '7px 22px',
-                borderRadius: '7px',
+                fontSize: '24px',
+                padding: '12px 38px',
+                borderRadius: '9px',
                 border: on ? '1px solid rgba(255,255,255,0.12)' : '1px solid transparent',
-                minHeight: '38px',
+                minHeight: '64px',
                 letterSpacing: '0.02em',
               }}
               aria-pressed={on}
@@ -75,7 +75,7 @@ export const Dashboard = () => {
               {count > 0 && (
                 <span
                   className="ml-2 font-mono text-emerald-400"
-                  style={{ fontSize: '12px' }}
+                  style={{ fontSize: '18px' }}
                 >
                   {count}
                 </span>
@@ -88,7 +88,7 @@ export const Dashboard = () => {
       {/* Component cards — fixed size, flex-wrap, top-left, blank space is fine */}
       <div
         className="flex flex-wrap content-start overflow-y-auto"
-        style={{ gap: '14px', flex: '1 1 0', minHeight: 0 }}
+        style={{ gap: '22px', flex: '1 1 0', minHeight: 0 }}
       >
         {tiles.map((c) => (
           <ComponentTile key={c.id} component={c} />
