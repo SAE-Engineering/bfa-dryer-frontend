@@ -1,19 +1,20 @@
-// Main dashboard: temperatures row + three component group columns.
-// Fills the available height (100% of flex-1 main) — no vertical scroll.
-// Row split: temps ~24%, components ~76%.
-// Group mapping per HMI_CONTRACT.md:
-//   Heating:   hot_fan, burner, burner_high
-//   Feed:      load_conv, spinner, agitator1, agitator2, trace_chain
-//   Discharge: disch_agi, brush, disch_conv, mill, shaker
+// Paged dashboard for the 10.1" FA1019 touch panel.
+// Persistent: status bar (in App) + temperatures row (always visible).
+// Below: big touch tabs — Heating / Feed / Discharge — each group on its OWN page,
+// tiles laid out in a grid that fills the page (no scroll, no clipping).
+// Group mapping per HMI_CONTRACT.md.
 
+import { useState } from 'react'
 import { useControlStore } from '../store/controlStore'
 import { TempPanel } from './TempPanel'
-import { ComponentGroup } from './ComponentGroup'
+import { ComponentTile } from './ComponentTile'
 import { Component } from '../types'
 
-const HEATING_IDS = ['hot_fan', 'burner', 'burner_high']
-const FEED_IDS = ['load_conv', 'spinner', 'agitator1', 'agitator2', 'trace_chain']
-const DISCHARGE_IDS = ['disch_agi', 'brush', 'disch_conv', 'mill', 'shaker']
+const PAGES: { key: string; title: string; ids: string[] }[] = [
+  { key: 'heating', title: 'Heating', ids: ['hot_fan', 'burner', 'burner_high'] },
+  { key: 'feed', title: 'Feed', ids: ['load_conv', 'spinner', 'agitator1', 'agitator2', 'trace_chain'] },
+  { key: 'discharge', title: 'Discharge', ids: ['disch_agi', 'brush', 'disch_conv', 'mill', 'shaker'] },
+]
 
 function pick(components: Component[], ids: string[]): Component[] {
   return ids.flatMap((id) => {
@@ -25,6 +26,7 @@ function pick(components: Component[], ids: string[]): Component[] {
 export const Dashboard = () => {
   const dryer = useControlStore((s) => s.dryer)
   const wsStatus = useControlStore((s) => s.wsStatus)
+  const [active, setActive] = useState('heating')
 
   if (wsStatus !== 'open' || dryer.components.length === 0) {
     return (
@@ -34,32 +36,62 @@ export const Dashboard = () => {
     )
   }
 
-  const heating = pick(dryer.components, HEATING_IDS)
-  const feed = pick(dryer.components, FEED_IDS)
-  const discharge = pick(dryer.components, DISCHARGE_IDS)
+  const page = PAGES.find((p) => p.key === active) ?? PAGES[0]
+  const tiles = pick(dryer.components, page.ids)
+  // up to 3 columns; rows auto-sized equal so tiles fill the page
+  const cols = Math.min(3, Math.max(1, tiles.length === 4 ? 2 : tiles.length < 3 ? tiles.length : 3))
 
   return (
-    // Fills the full available height, no overflow, no padding that would cause scroll
-    <div className="flex flex-col h-full overflow-hidden" style={{ gap: '0.5vh', padding: '0.5vh 0.75vw' }}>
-
-      {/* Row 1 — Temperatures: ~24% of available height */}
-      <div style={{ flex: '0 0 23%', minHeight: 0 }}>
+    <div className="flex flex-col h-full overflow-hidden" style={{ gap: '0.6vh', padding: '0.5vh 0.75vw' }}>
+      {/* Temperatures — always visible */}
+      <div style={{ flex: '0 0 20%', minHeight: 0 }}>
         <TempPanel temps={dryer.temps} />
       </div>
 
-      {/* Row 2 — Component groups: fill rest */}
-      <div className="flex gap-x-[0.75vw] overflow-hidden" style={{ flex: '1 1 0', minHeight: 0 }}>
-        <div className="flex-1 min-w-0 min-h-0">
-          <ComponentGroup title="Heating" components={heating} />
-        </div>
-        <div className="flex-1 min-w-0 min-h-0">
-          <ComponentGroup title="Feed" components={feed} />
-        </div>
-        <div className="flex-1 min-w-0 min-h-0">
-          <ComponentGroup title="Discharge" components={discharge} />
-        </div>
+      {/* Page tabs — big touch targets */}
+      <div className="flex shrink-0" style={{ gap: '0.6vw', height: 'clamp(54px, 8vh, 84px)' }}>
+        {PAGES.map((p) => {
+          const on = p.key === active
+          const count = pick(dryer.components, p.ids).filter((c) => c.running).length
+          return (
+            <button
+              key={p.key}
+              onClick={() => setActive(p.key)}
+              className={`flex-1 rounded-lg font-black tracking-wide transition-colors select-none touch-none border-2 ${
+                on
+                  ? 'bg-emerald-600 border-emerald-400 text-white'
+                  : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'
+              }`}
+              style={{ fontSize: 'clamp(18px, 2.4vh, 30px)' }}
+              aria-pressed={on}
+            >
+              {p.title}
+              <span
+                className={`ml-2 font-mono ${on ? 'text-emerald-100' : 'text-emerald-400'}`}
+                style={{ fontSize: 'clamp(13px, 1.6vh, 20px)' }}
+              >
+                {count}▶
+              </span>
+            </button>
+          )
+        })}
       </div>
 
+      {/* Active group — grid fills the rest */}
+      <div
+        className="grid overflow-hidden"
+        style={{
+          flex: '1 1 0',
+          minHeight: 0,
+          gap: '0.8vh 0.8vw',
+          gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+          gridAutoRows: 'minmax(0, 1fr)',
+        }}
+      >
+        {tiles.map((c) => (
+          <ComponentTile key={c.id} component={c} />
+        ))}
+      </div>
     </div>
   )
 }

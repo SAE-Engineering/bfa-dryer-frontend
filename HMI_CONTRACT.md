@@ -11,7 +11,7 @@ No automation/sequencing. Dark theme. Touch-friendly (this runs full-screen on t
 | id | label | kind | has_speed | cmd_bit (%MW0) | status_bit (%MW20) | speed_sp_reg | speed_act_reg |
 |----|-------|------|-----------|-----|-----|-----|-----|
 | hot_fan | Hot Fan | vsd | yes | 0 | 0 | %MW1 | %MW22 |
-| disch_agi | Discharge Agitator | vsd | yes | 1 | 1 | %MW6 | %MW27 |
+| disch_agi | Discharge Agitator | vsd | **no** | 1 | 1 | — | — | (soft-start, run/stop only; %MW6 freed) |
 | spinner | Spinner | vsd | yes | 2 | 2 | %MW3 | %MW24 |
 | agitator1 | Agitator 1 | vsd | yes | 3 | 3 | %MW4 | %MW25 |
 | agitator2 | Agitator 2 | vsd | yes | 4 | 4 | %MW5 | %MW26 |

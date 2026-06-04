@@ -35,7 +35,7 @@ class Component:
 # Order matches HMI_CONTRACT.md — do NOT reorder; bit positions are load-bearing.
 COMPONENTS: list[Component] = [
     Component("hot_fan",    "Hot Fan",              "vsd",    True,  0,  0,  1, 22),
-    Component("disch_agi",  "Discharge Agitator",   "vsd",    True,  1,  1,  6, 27),
+    Component("disch_agi",  "Discharge Agitator",   "vsd",    False, 1,  1,  None, None),  # ABB soft-start, run/stop only — no speed
     Component("spinner",    "Spinner",              "vsd",    True,  2,  2,  3, 24),
     Component("agitator1",  "Agitator 1",           "vsd",    True,  3,  3,  4, 25),
     Component("agitator2",  "Agitator 2",           "vsd",    True,  4,  4,  5, 26),
