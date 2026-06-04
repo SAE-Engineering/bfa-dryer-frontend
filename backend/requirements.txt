@@ -4,3 +4,4 @@ pymodbus>=3.6,<4
 pydantic>=2.5
 pydantic-settings>=2.1
 aiofiles>=23.2
+cryptography>=42.0

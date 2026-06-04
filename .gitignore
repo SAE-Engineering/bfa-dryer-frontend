@@ -34,3 +34,5 @@ data/*.csv
 # Python bytecode (all levels)
 **/__pycache__/
 **/*.pyc
+data/license.json
+data/.license_hw

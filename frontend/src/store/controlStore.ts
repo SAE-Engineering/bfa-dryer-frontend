@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { DryerState, Component, Temps, Setpoints } from '../types'
+import { DryerState, Component, Temps, Setpoints, License } from '../types'
 
 // Default / null state shown while connecting
 const DEFAULT_TEMPS: Temps = {
@@ -16,6 +16,17 @@ const DEFAULT_SETPOINTS: Setpoints = {
   product_max: 92.0,
 }
 
+const DEFAULT_LICENSE: License = {
+  status: 'ok',
+  locked: false,
+  customer: '',
+  machine_id: '',
+  warn: null,
+  expires: null,
+  days_left: null,
+  message: '',
+}
+
 const DEFAULT_STATE: DryerState = {
   type: 'state',
   ts: '',
@@ -26,6 +37,7 @@ const DEFAULT_STATE: DryerState = {
   components: [],
   temps: DEFAULT_TEMPS,
   setpoints: DEFAULT_SETPOINTS,
+  license: DEFAULT_LICENSE,
 }
 
 interface StoreState {

@@ -36,6 +36,7 @@ export const Dashboard = () => {
     )
   }
 
+  const locked = dryer.license?.locked ?? false
   const page = PAGES.find((p) => p.key === active) ?? PAGES[0]
   const tiles = pick(dryer.components, page.ids)
 
@@ -94,7 +95,7 @@ export const Dashboard = () => {
         style={{ gap: '22px', flex: '1 1 0', minHeight: 0 }}
       >
         {tiles.map((c) => (
-          <ComponentTile key={c.id} component={c} />
+          <ComponentTile key={c.id} component={c} locked={locked} />
         ))}
       </div>
       </div>

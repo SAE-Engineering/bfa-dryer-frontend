@@ -1,5 +1,6 @@
 import { useWebSocket } from './hooks/useWebSocket'
 import { StatusBar } from './components/StatusBar'
+import { LicenseBanner } from './components/LicenseBanner'
 import { Dashboard } from './components/Dashboard'
 
 function App() {
@@ -8,6 +9,7 @@ function App() {
   return (
     <div className="flex flex-col w-screen h-screen bg-gray-950 text-white overflow-hidden">
       <StatusBar />
+      <LicenseBanner />
       {/* main fills remaining height, no scroll */}
       <main className="flex-1 min-h-0 overflow-hidden">
         <Dashboard />

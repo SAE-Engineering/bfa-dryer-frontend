@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     LOG_DIR: str = "/data"
     LOG_INTERVAL_S: int = 5
 
+    # Licence enforcement (offline kill-switch)
+    LICENSE_ENFORCE: bool = True
+    LICENSE_PATH: str = "/data/license.json"
+    LICENSE_HW_PATH: str = "/data/.license_hw"
+    LICENSE_REQUIRE_MACHINE: bool = True
+    MACHINE_ID: str = ""        # blank -> falls back to the host name at startup
+
     # Server / dev settings
     DEBUG: bool = False
     HOST: str = "0.0.0.0"

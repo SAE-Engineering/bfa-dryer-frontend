@@ -1,6 +1,9 @@
 // Single component tile: label, running LED, big ON/OFF toggle switch, fault indicator.
 // For has_speed components: chunky speed slider + actual/SP readout.
 // Sized for the FA1019 10.1" touch panel — big touch targets, large text.
+//
+// Licence lock: when `locked`, the tile may not START (toggle to ON / change speed),
+// but STOP is always permitted (no-sabotage). Indicator-only tiles are unaffected.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Component } from '../types'
@@ -9,9 +12,10 @@ import { useControlStore } from '../store/controlStore'
 
 interface ComponentTileProps {
   component: Component
+  locked?: boolean
 }
 
-export const ComponentTile = ({ component }: ComponentTileProps) => {
+export const ComponentTile = ({ component, locked = false }: ComponentTileProps) => {
   const setComponentCmd = useControlStore((s) => s.setComponentCmd)
   const { id, label, has_speed, manual, cmd, running, fault, speed_pct } = component
 
@@ -25,12 +29,15 @@ export const ComponentTile = ({ component }: ComponentTileProps) => {
 
   const handleToggle = useCallback(() => {
     const next = !cmd
+    // Licence lock blocks STARTS only; STOP (next === false) always allowed.
+    if (locked && next) return
     setComponentCmd(id, next)
     api.sendCommand({ id, on: next }).catch(() => setComponentCmd(id, cmd))
-  }, [id, cmd, setComponentCmd])
+  }, [id, cmd, locked, setComponentCmd])
 
   const handleSpeedChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (locked) return
       const val = Number(e.target.value)
       setLocalSpeed(val)
       dragging.current = true
@@ -40,11 +47,14 @@ export const ComponentTile = ({ component }: ComponentTileProps) => {
         api.sendSpeed({ id, value_pct: val }).catch(() => {})
       }, 300)
     },
-    [id]
+    [id, locked]
   )
 
   const borderColor = fault ? '#dc2626' : running ? '#059669' : cmd ? '#065f46' : '#1f2937'
   const cardBg = fault ? '#1a0505' : '#111827'
+
+  // Start is disabled when locked and currently stopped.
+  const startDisabled = locked && !cmd
 
   return (
     <div
@@ -90,10 +100,12 @@ export const ComponentTile = ({ component }: ComponentTileProps) => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '22px' }}>
           <button
             onClick={handleToggle}
+            disabled={startDisabled}
             aria-pressed={cmd}
             aria-label={`${label} ${cmd ? 'ON' : 'OFF'}`}
             className="hmi-toggle"
             data-on={cmd ? 'true' : 'false'}
+            style={startDisabled ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
           />
           <span style={{
             fontSize: '26px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
@@ -101,6 +113,14 @@ export const ComponentTile = ({ component }: ComponentTileProps) => {
           }}>
             {cmd ? 'RUN' : 'STOP'}
           </span>
+          {startDisabled && (
+            <span style={{
+              fontSize: '15px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+              color: '#f87171', userSelect: 'none', marginLeft: 'auto',
+            }}>
+              🔒 Locked
+            </span>
+          )}
         </div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
@@ -142,8 +162,10 @@ export const ComponentTile = ({ component }: ComponentTileProps) => {
           <input
             type="range" min={0} max={100} step={1}
             value={localSpeed} onChange={handleSpeedChange}
+            disabled={locked}
             className="hmi-slider-slim"
             aria-label={`${label} speed setpoint`}
+            style={locked ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
           />
         </div>
       )}

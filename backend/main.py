@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel, Field
 import asyncio
 import logging
+import socket
 from pathlib import Path
 
 from app.components import COMPONENT_MAP, REG_CMD_WORD, REG_BURNER_SP, SETPOINT_REG_MAP
@@ -12,6 +13,7 @@ from app.modbus_client import ModbusClient, SimulatedPlcClient
 from app.websocket_handler import setup_websocket, manager
 from app.poll_loop import poll_loop, get_latest_state
 from app.logging_task import logging_task
+from app.license import LicenseManager
 from config import Settings
 
 logging.basicConfig(level=logging.INFO)
@@ -22,10 +24,34 @@ settings = Settings()
 # PLC client — selected at startup based on PLC_SIM
 plc_client = None
 
+# Licence manager — offline kill-switch (created at import so endpoints can use it)
+license_mgr = LicenseManager(
+    license_path=settings.LICENSE_PATH,
+    hw_path=settings.LICENSE_HW_PATH,
+    machine_id=(settings.MACHINE_ID or socket.gethostname()),
+    enforce=settings.LICENSE_ENFORCE,
+    require_machine=settings.LICENSE_REQUIRE_MACHINE,
+)
+
+
+def _assert_unlocked():
+    """Raise 403 when the licence is locked. Used to gate 'start/change' actions.
+
+    No-sabotage: this never stops running equipment — callers only gate
+    actions that START or CHANGE settings. STOP commands bypass this.
+    """
+    st = license_mgr.status()
+    if st.locked:
+        raise HTTPException(status_code=403, detail=st.message)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global plc_client
+
+    st = license_mgr.status()
+    logger.info(f"Licence: machine_id={license_mgr.machine_id} status={st.status} "
+                f"locked={st.locked} expires={st.expires}")
 
     if settings.PLC_SIM:
         logger.info("PLC_SIM=true — using simulated register bank")
@@ -42,7 +68,7 @@ async def lifespan(app: FastAPI):
 
     # Background tasks
     poll_task = asyncio.create_task(
-        poll_loop(plc_client, manager, settings),
+        poll_loop(plc_client, manager, settings, license_mgr),
         name="poll_loop",
     )
     log_task = asyncio.create_task(
@@ -112,6 +138,11 @@ async def health():
     }
 
 
+@app.get("/api/license")
+async def license_status():
+    return license_mgr.status().as_dict()
+
+
 @app.get("/api/state")
 async def state():
     s = get_latest_state()
@@ -125,6 +156,10 @@ async def command(req: CommandRequest):
     comp = COMPONENT_MAP.get(req.id)
     if comp is None:
         raise HTTPException(status_code=404, detail=f"Unknown component id: {req.id!r}")
+
+    # Licence gate: block STARTS only. STOP (on=False) is always allowed.
+    if req.on:
+        _assert_unlocked()
 
     ok = await plc_client.read_modify_write_bit(REG_CMD_WORD, comp.cmd_bit, req.on)
     if not ok:
@@ -141,6 +176,8 @@ async def set_speed(req: SpeedRequest):
     if not comp.has_speed or comp.speed_sp_reg is None:
         raise HTTPException(status_code=400, detail=f"Component {req.id!r} has no speed register")
 
+    _assert_unlocked()   # changing a setpoint is a "play" action
+
     # Scale 0-100 % → 0-10000; clamp
     raw = int(max(0, min(10000, round(req.value_pct * 100))))
     ok = await plc_client.write_register(comp.speed_sp_reg, raw)
@@ -152,6 +189,7 @@ async def set_speed(req: SpeedRequest):
 
 @app.post("/api/burner_setpoint")
 async def burner_setpoint(req: BurnerSetpointRequest):
+    _assert_unlocked()
     # °C → °C × 10 for register
     raw = int(round(req.celsius * 10))
     ok = await plc_client.write_register(REG_BURNER_SP, raw)
@@ -174,6 +212,9 @@ async def set_operator_setpoint(req: SetpointRequest):
             status_code=400,
             detail=f"Unknown setpoint key {req.key!r}. Valid keys: {list(SETPOINT_REG_MAP)}",
         )
+
+    _assert_unlocked()
+
     raw = int(max(0, min(2000, round(req.value_c * 10))))
     ok = await plc_client.write_register(reg, raw)
     if not ok:

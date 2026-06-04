@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build:
@@ -17,6 +15,10 @@ services:
       - LOG_DIR=/data
       - LOG_INTERVAL_S=${LOG_INTERVAL_S:-5}
       - DEBUG=${DEBUG:-false}
+      # Licence enforcement (offline kill-switch)
+      - LICENSE_ENFORCE=${LICENSE_ENFORCE:-true}
+      - LICENSE_REQUIRE_MACHINE=${LICENSE_REQUIRE_MACHINE:-true}
+      - MACHINE_ID=${MACHINE_ID:-}
     volumes:
       - ./backend:/app
       - ./data:/data

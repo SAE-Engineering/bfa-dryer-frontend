@@ -29,6 +29,19 @@ export interface Setpoints {
   product_max: number
 }
 
+export type LicenseStatusKind = 'ok' | 'warning' | 'expired' | 'invalid' | 'missing'
+
+export interface License {
+  status: LicenseStatusKind
+  locked: boolean
+  customer: string
+  machine_id: string
+  warn: string | null
+  expires: string | null
+  days_left: number | null
+  message: string
+}
+
 export interface DryerState {
   type: 'state'
   ts: string
@@ -39,6 +52,7 @@ export interface DryerState {
   components: Component[]
   temps: Temps
   setpoints: Setpoints
+  license?: License
 }
 
 // REST request / response shapes
