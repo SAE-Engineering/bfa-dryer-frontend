@@ -79,11 +79,8 @@ export const TempPanel = ({ temps }: TempPanelProps) => {
         Temperatures
       </div>
 
-      {/* 5 cards in a row, each taking equal width, filling remaining height */}
+      {/* Operator-facing temps (Hot Fan motor temp is the ACS355's own trip — not shown here) */}
       <div className="flex gap-x-[0.75vw] flex-1 min-h-0">
-        <div className="flex-1 min-w-0">
-          <TempCard label="Hot Fan Motor" value={temps.hotfan_motor} />
-        </div>
         <div className="flex-1 min-w-0">
           <TempCard label="Burner" value={temps.burner} />
         </div>

@@ -35,7 +35,7 @@ No automation/sequencing. Dark theme. Touch-friendly (this runs full-screen on t
     **X13 = fan proven running, X14 = safety OK (I0.13)**.
   - `%MW21` = fault word (bit k = fault on component k). Any bit set → show that component faulted.
   - `%MW22..%MW27` = actual speeds (same 0–10000 = 0–100% scale).
-  - Temps **°C ×10**: `%MW30` Hot Fan motor, `%MW31` Burner air, `%MW32` Product 1,
+  - Temps **°C ×10**: `%MW30` Hot Fan motor (LOGGED only — NOT on HMI; it is the ACS355 trip), `%MW31` Burner air, `%MW32` Product 1,
     `%MW33` Product 2, `%MW34` Exhaust. (value / 10 = °C.)
 
 ## Backend (FastAPI) requirements
