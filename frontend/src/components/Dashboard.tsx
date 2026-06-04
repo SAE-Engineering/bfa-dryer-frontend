@@ -85,9 +85,9 @@ export const Dashboard = () => {
         })}
       </div>
 
-      {/* Component cards — fixed size, flex-wrap, top-left, blank space is fine */}
+      {/* Component cards — VERTICAL flow: stack top→bottom, wrap into columns to the right */}
       <div
-        className="flex flex-wrap content-start overflow-y-auto"
+        className="flex flex-col flex-wrap content-start overflow-x-auto"
         style={{ gap: '22px', flex: '1 1 0', minHeight: 0 }}
       >
         {tiles.map((c) => (
