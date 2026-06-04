@@ -1,68 +1,89 @@
-import { useEffect, useState, useCallback } from 'react'
-import { useControlStore } from '../store/controlStore'
+// WebSocket hook for BFD Dryer HMI.
+// Connects to /ws (same-origin; Vite proxy → backend:8000 in dev).
+// Parses {type:"state",...} messages and pushes into Zustand store.
+// Auto-reconnects on drop with exponential backoff (cap 30s).
+// On mount also fires GET /api/state for an initial snapshot.
 
-const API_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
+import { useEffect, useRef } from 'react'
+import { useControlStore } from '../store/controlStore'
+import { api } from '../api/client'
+import { DryerState } from '../types'
+
+const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
 
 export const useWebSocket = () => {
-  const [ws, setWs] = useState<WebSocket | null>(null)
-  const setSensors = useControlStore((state) => state.setSensors)
-  const setStatus = useControlStore((state) => state.setStatus)
+  const setDryerState = useControlStore((s) => s.setDryerState)
+  const setWsStatus = useControlStore((s) => s.setWsStatus)
+  const retryDelay = useRef(1000)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const unmounted = useRef(false)
+
+  // Initial REST snapshot so the UI has something while WS handshakes
+  useEffect(() => {
+    api.getState().then(setDryerState).catch(() => {
+      // backend not up yet — that's fine, WS will deliver state
+    })
+  }, [setDryerState])
 
   useEffect(() => {
-    const socket = new WebSocket(API_URL)
+    unmounted.current = false
 
-    socket.onopen = () => {
-      console.log('WebSocket connected')
-      setStatus({
-        connected: true,
-        plcReady: true,
-        lastUpdate: new Date(),
-      })
-    }
+    function connect() {
+      if (unmounted.current) return
 
-    socket.onmessage = (event) => {
+      setWsStatus('connecting')
+      let socket: WebSocket
+
       try {
-        const data = JSON.parse(event.data)
-        if (data.type === 'sensor_data') {
-          setSensors(data.payload)
-        }
-      } catch (e) {
-        console.error('WebSocket message parse error:', e)
+        socket = new WebSocket(WS_URL)
+      } catch {
+        // WebSocket constructor can throw in some environments
+        scheduleRetry()
+        return
       }
+
+      socket.onopen = () => {
+        retryDelay.current = 1000  // reset backoff
+        setWsStatus('open')
+      }
+
+      socket.onmessage = (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data as string) as { type: string }
+          if (data.type === 'state') {
+            setDryerState(data as DryerState)
+          }
+        } catch {
+          // malformed frame — ignore
+        }
+      }
+
+      socket.onerror = () => {
+        // onclose fires right after; handle retry there
+      }
+
+      socket.onclose = () => {
+        setWsStatus('closed')
+        scheduleRetry()
+      }
+
+      return socket
     }
 
-    socket.onerror = () => {
-      setStatus({
-        connected: false,
-        plcReady: false,
-        lastUpdate: new Date(),
-      })
+    function scheduleRetry() {
+      if (unmounted.current) return
+      timerRef.current = setTimeout(() => {
+        connect()
+      }, retryDelay.current)
+      retryDelay.current = Math.min(retryDelay.current * 2, 30_000)
     }
 
-    socket.onclose = () => {
-      console.log('WebSocket disconnected')
-      setStatus({
-        connected: false,
-        plcReady: false,
-        lastUpdate: new Date(),
-      })
-    }
-
-    setWs(socket)
+    const sock = connect()
 
     return () => {
-      socket.close()
+      unmounted.current = true
+      if (timerRef.current) clearTimeout(timerRef.current)
+      sock?.close()
     }
-  }, [setSensors, setStatus])
-
-  const sendCommand = useCallback(
-    (command: string, payload?: any) => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'command', command, payload }))
-      }
-    },
-    [ws]
-  )
-
-  return { ws, sendCommand }
+  }, [setDryerState, setWsStatus])
 }

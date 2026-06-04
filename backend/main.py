@@ -1,49 +1,70 @@
-from fastapi import FastAPI, WebSocketException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
+from pydantic import BaseModel, Field
 import asyncio
 import logging
 from pathlib import Path
 
-from app.modbus_client import ModbusClient
-from app.websocket_handler import setup_websocket
+from app.components import COMPONENT_MAP, REG_CMD_WORD, REG_BURNER_SP
+from app.modbus_client import ModbusClient, SimulatedPlcClient
+from app.websocket_handler import setup_websocket, manager
+from app.poll_loop import poll_loop, get_latest_state
+from app.logging_task import logging_task
 from config import Settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global state
-modbus_client: ModbusClient = None
 settings = Settings()
+
+# PLC client — selected at startup based on PLC_SIM
+plc_client = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    global modbus_client
-    modbus_client = ModbusClient(
-        host=settings.PLC_HOST,
-        port=settings.PLC_PORT,
-        unit_id=settings.MODBUS_UNIT_ID,
+    global plc_client
+
+    if settings.PLC_SIM:
+        logger.info("PLC_SIM=true — using simulated register bank")
+        plc_client = SimulatedPlcClient()
+        await plc_client.connect()
+    else:
+        logger.info(f"PLC_SIM=false — connecting to {settings.PLC_HOST}:{settings.PLC_PORT}")
+        plc_client = ModbusClient(
+            host=settings.PLC_HOST,
+            port=settings.PLC_PORT,
+            unit_id=settings.MODBUS_UNIT_ID,
+        )
+        await plc_client.connect()
+
+    # Background tasks
+    poll_task = asyncio.create_task(
+        poll_loop(plc_client, manager, settings),
+        name="poll_loop",
     )
-    await modbus_client.connect()
-    logger.info(f"Connected to PLC at {settings.PLC_HOST}:{settings.PLC_PORT}")
-    
+    log_task = asyncio.create_task(
+        logging_task(settings),
+        name="logging_task",
+    )
+
     yield
-    
+
     # Shutdown
-    await modbus_client.close()
-    logger.info("Disconnected from PLC")
+    poll_task.cancel()
+    log_task.cancel()
+    await plc_client.close()
+    logger.info("BFD HMI backend shut down")
 
 
 app = FastAPI(
-    title="BFA Dryer HMI",
+    title="BFD Dryer HMI",
     description="Banana Dryer Control Panel",
     lifespan=lifespan,
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -52,28 +73,99 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Setup WebSocket
 setup_websocket(app)
 
-# Static files (React frontend build)
+# Serve the built React frontend if it exists
 frontend_path = Path(__file__).parent.parent / "frontend" / "dist"
 if frontend_path.exists():
     app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
 
 
+# ---------------------------------------------------------------------------
+# Request / response models
+# ---------------------------------------------------------------------------
+
+class CommandRequest(BaseModel):
+    id: str
+    on: bool
+
+
+class SpeedRequest(BaseModel):
+    id: str
+    value_pct: float = Field(ge=0.0, le=100.0)
+
+
+class BurnerSetpointRequest(BaseModel):
+    celsius: float = Field(ge=0.0, le=1200.0)
+
+
+# ---------------------------------------------------------------------------
+# REST endpoints
+# ---------------------------------------------------------------------------
+
 @app.get("/api/health")
 async def health():
     return {
-        "status": "ok",
-        "plc_connected": modbus_client.is_connected if modbus_client else False,
+        "ok":        True,
+        "connected": plc_client.is_connected if plc_client else False,
+        "sim":       settings.PLC_SIM,
     }
+
+
+@app.get("/api/state")
+async def state():
+    s = get_latest_state()
+    if not s:
+        raise HTTPException(status_code=503, detail="No state available yet")
+    return s
+
+
+@app.post("/api/command")
+async def command(req: CommandRequest):
+    comp = COMPONENT_MAP.get(req.id)
+    if comp is None:
+        raise HTTPException(status_code=404, detail=f"Unknown component id: {req.id!r}")
+
+    ok = await plc_client.read_modify_write_bit(REG_CMD_WORD, comp.cmd_bit, req.on)
+    if not ok:
+        raise HTTPException(status_code=502, detail="Modbus write failed")
+
+    return {"ok": True, "id": req.id, "on": req.on}
+
+
+@app.post("/api/speed")
+async def set_speed(req: SpeedRequest):
+    comp = COMPONENT_MAP.get(req.id)
+    if comp is None:
+        raise HTTPException(status_code=404, detail=f"Unknown component id: {req.id!r}")
+    if not comp.has_speed or comp.speed_sp_reg is None:
+        raise HTTPException(status_code=400, detail=f"Component {req.id!r} has no speed register")
+
+    # Scale 0-100 % → 0-10000; clamp
+    raw = int(max(0, min(10000, round(req.value_pct * 100))))
+    ok = await plc_client.write_register(comp.speed_sp_reg, raw)
+    if not ok:
+        raise HTTPException(status_code=502, detail="Modbus write failed")
+
+    return {"ok": True, "id": req.id, "value_pct": req.value_pct, "raw": raw}
+
+
+@app.post("/api/burner_setpoint")
+async def burner_setpoint(req: BurnerSetpointRequest):
+    # °C → °C × 10 for register
+    raw = int(round(req.celsius * 10))
+    ok = await plc_client.write_register(REG_BURNER_SP, raw)
+    if not ok:
+        raise HTTPException(status_code=502, detail="Modbus write failed")
+
+    return {"ok": True, "celsius": req.celsius, "raw": raw}
 
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=settings.HOST,
+        port=settings.PORT,
         reload=settings.DEBUG,
     )

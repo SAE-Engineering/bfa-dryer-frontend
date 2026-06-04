@@ -1,40 +1,51 @@
 import { create } from 'zustand'
-import { SensorData, ControlState, SystemStatus } from '../types'
+import { DryerState, Component, Temps } from '../types'
 
-interface State {
-  sensors: SensorData
-  controls: ControlState
-  status: SystemStatus
-  setSensors: (sensors: SensorData) => void
-  setControl: (key: keyof ControlState, value: boolean) => void
-  setStatus: (status: SystemStatus) => void
+// Default / null state shown while connecting
+const DEFAULT_TEMPS: Temps = {
+  hotfan_motor: 0,
+  burner: 0,
+  product1: 0,
+  product2: 0,
+  exhaust: 0,
 }
 
-export const useControlStore = create<State>((set) => ({
-  sensors: {
-    heatInput: 0,
-    product1: 0,
-    product2: 0,
-    exhaust: 0,
-  },
-  controls: {
-    burner: false,
-    fan: false,
-    conveyorA1: false,
-    conveyorA2: false,
-    spin: false,
-    hopper: false,
-    mill: false,
-  },
-  status: {
-    connected: false,
-    plcReady: false,
-    lastUpdate: new Date(),
-  },
-  setSensors: (sensors) => set({ sensors }),
-  setControl: (key, value) =>
-    set((state) => ({
-      controls: { ...state.controls, [key]: value },
+const DEFAULT_STATE: DryerState = {
+  type: 'state',
+  ts: '',
+  connected: false,
+  sim: false,
+  safety_ok: false,
+  fan_proven: false,
+  components: [],
+  temps: DEFAULT_TEMPS,
+}
+
+interface StoreState {
+  dryer: DryerState
+  wsStatus: 'connecting' | 'open' | 'closed'
+  // Set the entire state from a WS message or REST snapshot
+  setDryerState: (state: DryerState) => void
+  setWsStatus: (s: 'connecting' | 'open' | 'closed') => void
+  // Optimistic update: flip cmd on a single component
+  setComponentCmd: (id: string, on: boolean) => void
+}
+
+export const useControlStore = create<StoreState>((set) => ({
+  dryer: DEFAULT_STATE,
+  wsStatus: 'connecting',
+
+  setDryerState: (state) => set({ dryer: state }),
+
+  setWsStatus: (s) => set({ wsStatus: s }),
+
+  setComponentCmd: (id, on) =>
+    set((prev) => ({
+      dryer: {
+        ...prev.dryer,
+        components: prev.dryer.components.map((c: Component) =>
+          c.id === id ? { ...c, cmd: on } : c
+        ),
+      },
     })),
-  setStatus: (status) => set({ status }),
 }))

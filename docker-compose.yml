@@ -6,15 +6,20 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     container_name: bfa-hmi-backend
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     environment:
       - PLC_HOST=${PLC_HOST:-192.168.1.100}
       - PLC_PORT=${PLC_PORT:-502}
       - MODBUS_UNIT_ID=${MODBUS_UNIT_ID:-1}
+      - POLL_MS=${POLL_MS:-500}
+      - PLC_SIM=${PLC_SIM:-true}
+      - LOG_DIR=/data
+      - LOG_INTERVAL_S=${LOG_INTERVAL_S:-5}
       - DEBUG=${DEBUG:-false}
     volumes:
       - ./backend:/app
+      - ./data:/data
     restart: unless-stopped
     networks:
       - bfa-network
@@ -25,7 +30,7 @@ services:
       dockerfile: Dockerfile.frontend
     container_name: bfa-hmi-frontend
     ports:
-      - "3000:3000"
+      - "5054:80"
     depends_on:
       - backend
     restart: unless-stopped

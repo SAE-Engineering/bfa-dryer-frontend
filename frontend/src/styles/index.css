@@ -2,10 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply m-0 p-0 font-sans;
+/* Fullscreen HMI — no browser chrome bleed, no bounce scroll */
+html, body {
+  @apply m-0 p-0 bg-gray-950 overflow-hidden;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
 
 #root {
-  @apply h-screen;
+  @apply h-screen w-screen overflow-hidden;
+}
+
+/* Range input: uniform appearance across WebKit/Gecko */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  @apply bg-gray-700 rounded-full;
+  height: 8px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  @apply bg-emerald-500 rounded-full;
+  width: 28px;
+  height: 28px;
+  margin-top: -10px;
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-track {
+  @apply bg-gray-700 rounded-full;
+  height: 8px;
+}
+
+input[type="range"]::-moz-range-thumb {
+  @apply bg-emerald-500 rounded-full border-0;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+}
+
+/* Scrollable main area uses momentum scroll on iOS */
+main {
+  -webkit-overflow-scrolling: touch;
 }
