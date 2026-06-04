@@ -42,8 +42,8 @@ export const Dashboard = () => {
   return (
     <div className="flex h-full overflow-hidden" style={{ gap: '16px', padding: '12px 16px' }}>
 
-      {/* Temperatures — vertical column down the left */}
-      <div className="shrink-0 h-full" style={{ width: '400px' }}>
+      {/* Temperatures — wider vertical column down the left */}
+      <div className="shrink-0 h-full" style={{ width: '560px' }}>
         <TempPanel temps={dryer.temps} setpoints={dryer.setpoints} />
       </div>
 

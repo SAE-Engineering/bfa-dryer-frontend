@@ -364,7 +364,7 @@ const TempCard = ({ label, value, modalKind, onLongPress }: TempCardProps) => {
         <span style={{
           fontFamily: 'monospace',
           fontWeight: 900,
-          fontSize: '84px',
+          fontSize: '120px',
           lineHeight: 1,
           color: valueColor,
           fontVariantNumeric: 'tabular-nums',
@@ -373,7 +373,7 @@ const TempCard = ({ label, value, modalKind, onLongPress }: TempCardProps) => {
         </span>
         <span style={{
           fontWeight: 700,
-          fontSize: '34px',
+          fontSize: '46px',
           color: unitColor,
         }}>
           °C
