@@ -10,6 +10,7 @@ from pathlib import Path
 
 from app.components import COMPONENT_MAP, REG_CMD_WORD, REG_BURNER_SP, SETPOINT_REG_MAP
 from app.modbus_client import ModbusClient, SimulatedPlcClient
+from app.umas_client import UmasMwClient
 from app.websocket_handler import setup_websocket, manager
 from app.poll_loop import poll_loop, get_latest_state
 from app.logging_task import logging_task
@@ -21,10 +22,10 @@ logger = logging.getLogger(__name__)
 
 settings = Settings()
 
-# PLC client — selected at startup based on PLC_SIM
+# PLC client — selected at startup based on PLC_SIM / PLC_PROTO
 plc_client = None
 
-# Licence manager — offline kill-switch (created at import so endpoints can use it)
+# Licence manager — offline kill-switch
 license_mgr = LicenseManager(
     license_path=settings.LICENSE_PATH,
     hw_path=settings.LICENSE_HW_PATH,
@@ -57,8 +58,19 @@ async def lifespan(app: FastAPI):
         logger.info("PLC_SIM=true — using simulated register bank")
         plc_client = SimulatedPlcClient()
         await plc_client.connect()
+    elif settings.PLC_PROTO.lower() == "umas":
+        logger.info(
+            f"PLC_PROTO=umas — connecting to {settings.PLC_HOST}:{settings.PLC_PORT} via UMAS"
+        )
+        plc_client = UmasMwClient(
+            host=settings.PLC_HOST,
+            port=settings.PLC_PORT,
+        )
+        await plc_client.connect()
     else:
-        logger.info(f"PLC_SIM=false — connecting to {settings.PLC_HOST}:{settings.PLC_PORT}")
+        logger.info(
+            f"PLC_PROTO=modbus — connecting to {settings.PLC_HOST}:{settings.PLC_PORT} via Modbus"
+        )
         plc_client = ModbusClient(
             host=settings.PLC_HOST,
             port=settings.PLC_PORT,
@@ -135,6 +147,7 @@ async def health():
         "ok":        True,
         "connected": plc_client.is_connected if plc_client else False,
         "sim":       settings.PLC_SIM,
+        "proto":     settings.PLC_PROTO,
     }
 
 
@@ -163,7 +176,7 @@ async def command(req: CommandRequest):
 
     ok = await plc_client.read_modify_write_bit(REG_CMD_WORD, comp.cmd_bit, req.on)
     if not ok:
-        raise HTTPException(status_code=502, detail="Modbus write failed")
+        raise HTTPException(status_code=502, detail="PLC write failed")
 
     return {"ok": True, "id": req.id, "on": req.on}
 
@@ -176,13 +189,13 @@ async def set_speed(req: SpeedRequest):
     if not comp.has_speed or comp.speed_sp_reg is None:
         raise HTTPException(status_code=400, detail=f"Component {req.id!r} has no speed register")
 
-    _assert_unlocked()   # changing a setpoint is a "play" action
+    _assert_unlocked()
 
     # Scale 0-100 % → 0-10000; clamp
     raw = int(max(0, min(10000, round(req.value_pct * 100))))
     ok = await plc_client.write_register(comp.speed_sp_reg, raw)
     if not ok:
-        raise HTTPException(status_code=502, detail="Modbus write failed")
+        raise HTTPException(status_code=502, detail="PLC write failed")
 
     return {"ok": True, "id": req.id, "value_pct": req.value_pct, "raw": raw}
 
@@ -190,11 +203,10 @@ async def set_speed(req: SpeedRequest):
 @app.post("/api/burner_setpoint")
 async def burner_setpoint(req: BurnerSetpointRequest):
     _assert_unlocked()
-    # °C → °C × 10 for register
     raw = int(round(req.celsius * 10))
     ok = await plc_client.write_register(REG_BURNER_SP, raw)
     if not ok:
-        raise HTTPException(status_code=502, detail="Modbus write failed")
+        raise HTTPException(status_code=502, detail="PLC write failed")
 
     return {"ok": True, "celsius": req.celsius, "raw": raw}
 
@@ -218,15 +230,14 @@ async def set_operator_setpoint(req: SetpointRequest):
     raw = int(max(0, min(2000, round(req.value_c * 10))))
     ok = await plc_client.write_register(reg, raw)
     if not ok:
-        raise HTTPException(status_code=502, detail="Modbus write failed")
+        raise HTTPException(status_code=502, detail="PLC write failed")
 
     return {"ok": True, "key": req.key, "value_c": round(raw / 10.0, 1), "raw": raw}
 
 
 # Serve the built React frontend if it exists.
 # MUST be mounted AFTER all @app.get / @app.post route definitions so
-# FastAPI's router matches API paths first; the "/" catch-all only fires
-# for anything that doesn't match an API or WS route.
+# FastAPI's router matches API paths first.
 frontend_path = Path(__file__).parent.parent / "frontend" / "dist"
 if frontend_path.exists():
     app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")

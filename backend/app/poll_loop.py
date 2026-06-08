@@ -2,16 +2,24 @@
 Poll loop — reads PLC registers every POLL_MS and broadcasts the state
 JSON over WebSocket to all connected clients.
 
+UMAS path (PLC_PROTO=umas):
+  Single read_many([0, 31, 32, 33, 34, 45]) per poll — one round-trip.
+  %MW0 = command word; cmd==running because %Q = %MW0:Xn in the ladder.
+  Temps from %MW31-34 (÷ 10 → °C); burner setpoint %MW45 for display.
+
+Modbus path (PLC_PROTO=modbus, legacy / sim):
+  Multiple FC03 reads as before.
+
 State JSON shape (per HMI_CONTRACT.md):
 {
   "type": "state",
   "ts": "<ISO 8601>",
   "connected": true,
-  "sim": true,
+  "sim": false,
   "safety_ok": true,
   "fan_proven": false,
   "components": [
-    {"id": "hot_fan", "label": "Hot Fan", "kind": "vsd", "has_speed": true,
+    {"id": "hot_fan", "label": "Hot Fan", "kind": "dol", "has_speed": false,
      "cmd": false, "running": false, "fault": false, "speed_pct": 0.0},
     ...
   ],
@@ -19,7 +27,8 @@ State JSON shape (per HMI_CONTRACT.md):
     "hotfan_motor": 0.0, "burner": 0.0, "product1": 0.0,
     "product2": 0.0, "exhaust": 0.0
   },
-  "license": {"status": "ok", "locked": false, ...}
+  "setpoints": {...},
+  "license": {...}
 }
 """
 
@@ -38,6 +47,7 @@ from app.components import (
     BIT_FAN_PROVEN,
     BIT_SAFETY_OK,
     SETPOINT_REG_MAP,
+    REG_BURNER_SP,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,7 +70,11 @@ async def poll_loop(client, manager, settings, license_mgr=None):
 
     while True:
         try:
-            state = await _build_state(client, settings, license_mgr)
+            proto = getattr(settings, "PLC_PROTO", "modbus").lower()
+            if not settings.PLC_SIM and proto == "umas":
+                state = await _build_state_umas(client, settings, license_mgr)
+            else:
+                state = await _build_state_modbus(client, settings, license_mgr)
             _latest_state = state
             await manager.broadcast(state)
         except Exception as e:
@@ -68,8 +82,96 @@ async def poll_loop(client, manager, settings, license_mgr=None):
         await asyncio.sleep(interval)
 
 
-async def _build_state(client, settings, license_mgr=None) -> dict:
-    """Read all relevant registers and build the state dict."""
+# ---------------------------------------------------------------------------
+# UMAS state builder — one read_many round-trip
+# ---------------------------------------------------------------------------
+
+async def _build_state_umas(client, settings, license_mgr=None) -> dict:
+    """
+    UMAS path: read %MW0,31,32,33,34,45 in one burst.
+    %MW0 = command word; cmd==running (ladder wires %Q = %MW0:Xn directly).
+    """
+    addrs = [0, 31, 32, 33, 34, 45]
+    regs = await client.read_many(addrs)
+
+    if regs is None:
+        # Connection failed — build a disconnected state with last-known zeroes
+        cmd_word = 0
+        temps_raw = {31: 0, 32: 0, 33: 0, 34: 0}
+        burner_sp_raw = 0
+        connected = False
+    else:
+        cmd_word = regs.get(0, 0)
+        temps_raw = {31: regs.get(31, 0), 32: regs.get(32, 0),
+                     33: regs.get(33, 0), 34: regs.get(34, 0)}
+        burner_sp_raw = regs.get(45, 0)
+        connected = True
+
+    # On this PLC cmd == running (no separate running word)
+    running_word = cmd_word
+    fault_word = 0   # not used in current ladder
+
+    safety_ok  = bool(running_word & (1 << BIT_SAFETY_OK))
+    fan_proven = bool(running_word & (1 << BIT_FAN_PROVEN))
+
+    components = []
+    for comp in COMPONENTS:
+        cmd     = bool(cmd_word     & (1 << comp.cmd_bit))
+        running = bool(running_word & (1 << comp.status_bit))
+        fault   = bool(fault_word   & (1 << comp.status_bit))
+        components.append({
+            "id":        comp.id,
+            "label":     comp.label,
+            "kind":      comp.kind,
+            "has_speed": comp.has_speed,
+            "manual":    comp.manual,
+            "cmd":       cmd,
+            "running":   running,
+            "fault":     fault,
+            "speed_pct": 0.0,   # VSD actuals not wired yet
+        })
+
+    temps = {
+        "hotfan_motor": 0.0,                              # %MW30 sensor not wired
+        "burner":       round(temps_raw[31] / 10.0, 1),
+        "product1":     round(temps_raw[32] / 10.0, 1),
+        "product2":     round(temps_raw[33] / 10.0, 1),
+        "exhaust":      round(temps_raw[34] / 10.0, 1),
+    }
+
+    # Setpoints from %MW45-48 — display only; we already have MW45 from the burst.
+    # MW46-48 are not in our burst; read them separately if needed.
+    # For now expose burner air setpoint from MW45.
+    setpoints = {
+        "burner_hi_lo":  round(burner_sp_raw / 10.0, 1),
+        "burner_lo_off": 0.0,
+        "product_max":   0.0,
+    }
+
+    state = {
+        "type":       "state",
+        "ts":         datetime.now(timezone.utc).isoformat(),
+        "connected":  connected,
+        "sim":        settings.PLC_SIM,
+        "safety_ok":  safety_ok,
+        "fan_proven": fan_proven,
+        "components": components,
+        "temps":      temps,
+        "setpoints":  setpoints,
+    }
+
+    if license_mgr is not None:
+        state["license"] = license_mgr.status().as_dict()
+
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Modbus state builder — legacy path (also used for sim)
+# ---------------------------------------------------------------------------
+
+async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
+    """Read all relevant registers and build the state dict (Modbus/sim path)."""
 
     # Read the command word so we can report cmd (what the HMI last commanded)
     cmd_regs = await client.read_holding_registers(REG_CMD_WORD, 1)
@@ -86,7 +188,7 @@ async def _build_state(client, settings, license_mgr=None) -> dict:
 
     # Actual speeds: %MW22..%MW27 (6 registers)
     speed_regs = await client.read_holding_registers(REG_SPEED_ACT_BASE, 6)
-    speed_actuals: dict[int, int] = {}   # reg_address -> raw value
+    speed_actuals: dict[int, int] = {}
     if speed_regs:
         for i, val in enumerate(speed_regs):
             speed_actuals[REG_SPEED_ACT_BASE + i] = val
@@ -112,7 +214,7 @@ async def _build_state(client, settings, license_mgr=None) -> dict:
         speed_pct = 0.0
         if comp.has_speed and comp.speed_act_reg is not None:
             raw = speed_actuals.get(comp.speed_act_reg, 0)
-            speed_pct = round(raw / 100.0, 2)   # 0-10000 → 0.00-100.00 %
+            speed_pct = round(raw / 100.0, 2)
 
         components.append({
             "id":        comp.id,
@@ -132,8 +234,8 @@ async def _build_state(client, settings, license_mgr=None) -> dict:
         raw = temps_raw.get(reg, 0)
         temps[key] = round(raw / 10.0, 1)
 
-    # Read operator setpoint registers (%MW8, %MW9, %MW10)
-    sp_reg_addrs = list(SETPOINT_REG_MAP.values())  # [8, 9, 10]
+    # Read operator setpoint registers
+    sp_reg_addrs = list(SETPOINT_REG_MAP.values())
     sp_regs_raw = await client.read_holding_registers(min(sp_reg_addrs), len(sp_reg_addrs))
     setpoints: dict[str, float] = {}
     base = min(sp_reg_addrs)
