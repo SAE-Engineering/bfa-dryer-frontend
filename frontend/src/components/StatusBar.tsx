@@ -1,4 +1,4 @@
-// Top status bar: connection, SIM badge, Safety OK, Fan proven, logging indicator, clock.
+// Top status bar: SAE logo, connection, SIM badge, Safety OK, Fan proven, logging indicator, clock.
 // Designed for 1920×1200 @224 PPI industrial panel — text/LEDs large enough to read at a glance.
 
 import { useEffect, useState } from 'react'
@@ -47,10 +47,29 @@ export const StatusBar = () => {
   const loggingActive = wsStatus === 'open' && dryer.connected
 
   return (
-    <div className="flex items-center gap-6 px-5 bg-gray-900 border-b-2 border-gray-700 select-none shrink-0"
-         style={{ height: '7vh', minHeight: '52px', maxHeight: '72px' }}>
+    <div
+      className="flex items-center gap-6 px-5 bg-gray-900 border-b-2 border-gray-700 select-none shrink-0"
+      style={{ height: '9vh', minHeight: '68px', maxHeight: '88px' }}
+    >
+      {/* SAE Engineering logo — light pill backing so navy SVG reads on dark bg */}
+      <div
+        style={{
+          background: 'rgba(255,255,255,0.10)',
+          borderRadius: '10px',
+          padding: '5px 10px',
+          display: 'flex',
+          alignItems: 'center',
+          flexShrink: 0,
+        }}
+      >
+        <img
+          src="/sae-logo.png"
+          alt="SAE Engineering"
+          style={{ height: '48px', width: 'auto', display: 'block' }}
+        />
+      </div>
 
-      {/* Connection */}
+      {/* Connection — immediately right of logo */}
       <div className="flex items-center gap-2.5">
         <span className={`inline-block w-4 h-4 rounded-full shrink-0 ${connDot}`} />
         <span className={`font-bold text-lg leading-none ${connText}`}>{connLabel}</span>
