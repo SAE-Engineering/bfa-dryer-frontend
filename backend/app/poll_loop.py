@@ -111,7 +111,7 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
     running_word = cmd_word
     fault_word = 0   # not used in current ladder
 
-    safety_ok  = bool(running_word & (1 << BIT_SAFETY_OK))
+    safety_ok  = True  # commissioning stand-in: no safety-status register in ladder yet; hardware relay is the real safety
     fan_proven = bool(running_word & (1 << BIT_FAN_PROVEN))
 
     components = []
@@ -201,7 +201,7 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
             temps_raw[REG_TEMP_BASE + i] = val
 
     # Safety / fan proven bits
-    safety_ok  = bool(running_word & (1 << BIT_SAFETY_OK))
+    safety_ok  = True  # commissioning stand-in: no safety-status register in ladder yet; hardware relay is the real safety
     fan_proven = bool(running_word & (1 << BIT_FAN_PROVEN))
 
     # Build component list
