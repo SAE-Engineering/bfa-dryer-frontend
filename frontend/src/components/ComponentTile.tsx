@@ -10,6 +10,14 @@ import { Component } from '../types'
 import { api } from '../api/client'
 import { useControlStore } from '../store/controlStore'
 
+// ─── Shared touch lockout ──────────────────────────────────────────────────
+// After ANY accepted tile toggle, ignore further toggles (on any tile) for
+// TOGGLE_LOCKOUT_MS. Rejects touchscreen "bounce" (double/ghost firing) and
+// rapid re-fires. Module-level so it is shared across every tile instance.
+// The long-press → speed gesture is NOT gated by this lockout.
+const TOGGLE_LOCKOUT_MS = 500
+let lastToggleMs = -Infinity
+
 interface ComponentTileProps {
   component: Component
   locked?: boolean
@@ -196,13 +204,24 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
   const { id, label, has_speed, manual, cmd, running, fault, speed_pct } = component
 
   const [speedModalOpen, setSpeedModalOpen] = useState(false)
+  const [pressed, setPressed] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longFiredRef = useRef(false)
+  // Guards against the emulated mouse/click that some engines synthesise after
+  // a touch, and against pointerup firing on a stale pointer.
+  const pointerActiveRef = useRef(false)
 
   const handleToggle = useCallback(() => {
     const next = !cmd
     // Licence lock blocks STARTS only; STOP always allowed.
     if (locked && next) return
+    // 500ms shared lockout — reject bounce / rapid re-fire. A long-press that
+    // opens the speed modal never reaches here, so the gesture isn't blocked.
+    const now = performance.now()
+    if (now - lastToggleMs < TOGGLE_LOCKOUT_MS) return
+    lastToggleMs = now
+    // Optimistic: flip the local visual state instantly; WS state will confirm
+    // or correct it. On API failure, revert to the previous cmd.
     setComponentCmd(id, next)
     api.sendCommand({ id, on: next }).catch(() => setComponentCmd(id, cmd))
   }, [id, cmd, locked, setComponentCmd])
@@ -211,34 +230,48 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
     api.sendSpeed({ id, value_pct: value }).catch(() => {})
   }, [id])
 
-  // Pointer handlers — short tap = toggle, long press = speed modal (if has_speed)
-  const onPointerDown = useCallback(() => {
+  // ─── Pointer handlers (pointer events ONLY — no onClick, no double-fire) ──
+  // Short tap = toggle; long-press (~500ms) = speed modal (has_speed + manual).
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    // Stop the synthesised mouse/click after touch so it can't fire a 2nd time.
+    e.preventDefault()
+    // Capture the pointer so pointerup always lands on THIS tile even if the
+    // finger drifts slightly — fixes "the box isn't the trigger" / lost taps.
+    try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* noop */ }
+    pointerActiveRef.current = true
     longFiredRef.current = false
+    setPressed(true)
     if (has_speed && manual) {
       timerRef.current = setTimeout(() => {
         longFiredRef.current = true
+        setPressed(false)
         if (!locked) setSpeedModalOpen(true)
       }, LONG_PRESS_MS)
     }
   }, [has_speed, manual, locked])
 
-  const onPointerUp = useCallback(() => {
+  const onPointerUp = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    setPressed(false)
     if (timerRef.current) {
       clearTimeout(timerRef.current)
       timerRef.current = null
     }
-    // Only fire toggle if it was NOT a long press
-    if (!longFiredRef.current && manual) {
+    // Only fire toggle for a real tap on THIS pointer that was not a long press.
+    if (pointerActiveRef.current && !longFiredRef.current && manual) {
       handleToggle()
     }
+    pointerActiveRef.current = false
   }, [manual, handleToggle])
 
   const onPointerCancel = useCallback(() => {
+    setPressed(false)
     if (timerRef.current) {
       clearTimeout(timerRef.current)
       timerRef.current = null
     }
     longFiredRef.current = false
+    pointerActiveRef.current = false
   }, [])
 
   const startDisabled = locked && !cmd
@@ -259,8 +292,8 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
       <div
         onPointerDown={tileInteractive ? onPointerDown : undefined}
         onPointerUp={tileInteractive ? onPointerUp : undefined}
-        onPointerLeave={tileInteractive ? onPointerCancel : undefined}
         onPointerCancel={tileInteractive ? onPointerCancel : undefined}
+        onContextMenu={tileInteractive ? (e) => e.preventDefault() : undefined}
         style={{
           width: '600px',
           background: cardBg,
@@ -276,11 +309,16 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
           WebkitUserSelect: 'none',
           touchAction: 'manipulation',
           opacity: startDisabled ? 0.55 : 1,
-          transition: 'border-color 0.15s, background 0.15s',
+          // Immediate pressed feedback on pointerdown — perceived responsiveness.
+          transform: pressed && tileInteractive ? 'scale(0.985)' : 'scale(1)',
+          filter: pressed && tileInteractive ? 'brightness(1.15)' : 'none',
+          transition: 'border-color 0.15s, background 0.15s, transform 0.06s ease-out, filter 0.06s ease-out',
         } as React.CSSProperties}
       >
-        {/* Header: name left, indicators right */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+        {/* Header: name left, indicators right.
+         * pointerEvents:none so labels/badges can't swallow the tap — the whole
+         * tile (outer div) is the hit target. */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', pointerEvents: 'none' }}>
           <span style={{ fontSize: '30px', fontWeight: 700, color: '#f3f4f6', lineHeight: 1.15 }}>
             {label}
           </span>
@@ -315,7 +353,7 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
 
         {/* ON / OFF status badge */}
         {manual ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '18px', pointerEvents: 'none' }}>
             <span style={{
               fontSize: '44px', fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase',
               color: cmd ? '#6ee7b7' : '#6b7280', userSelect: 'none', lineHeight: 1,
@@ -335,7 +373,7 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
             )}
           </div>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '18px', pointerEvents: 'none' }}>
             <span style={{
               fontSize: '40px', fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase',
               color: running ? '#34d399' : '#6b7280', userSelect: 'none', lineHeight: 1,
@@ -358,7 +396,7 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
         {has_speed && (
           <div style={{
             display: 'flex', alignItems: 'baseline', gap: '8px',
-            borderTop: '1px solid #1f2937', paddingTop: '14px',
+            borderTop: '1px solid #1f2937', paddingTop: '14px', pointerEvents: 'none',
           }}>
             <span style={{
               fontFamily: 'monospace', fontSize: '72px', fontWeight: 900,

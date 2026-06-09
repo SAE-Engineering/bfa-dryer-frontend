@@ -7,6 +7,11 @@ html, body {
   @apply m-0 p-0 bg-gray-950 overflow-hidden;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
+  /* Kill the 300ms tap delay + double-tap-to-zoom across the whole panel,
+   * and stop text selection from hijacking touch on the kiosk HMI. */
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #root {
