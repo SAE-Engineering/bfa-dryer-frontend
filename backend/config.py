@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     LICENSE_REQUIRE_MACHINE: bool = True
     MACHINE_ID: str = ""        # blank -> falls back to the host name at startup
 
+    # Maintenance PIN to release the PLC link so MEB can take it for a program
+    # upload. On-panel maintenance gate, NOT a login credential.
+    PLC_RELEASE_PIN: str = "8800"
+
     # Server / dev settings
     DEBUG: bool = False
     HOST: str = "0.0.0.0"

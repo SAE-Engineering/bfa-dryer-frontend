@@ -46,6 +46,7 @@ export interface DryerState {
   type: 'state'
   ts: string
   connected: boolean
+  released?: boolean   // true → HMI link dropped for MEB (PLC still running)
   sim: boolean
   safety_ok: boolean
   fan_proven: boolean

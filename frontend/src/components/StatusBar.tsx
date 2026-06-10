@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { useControlStore } from '../store/controlStore'
 import { VsdNameplates } from './VsdNameplates'
 import { VsdPrograms } from './VsdPrograms'
+import { api } from '../api/client'
 
 function useClock() {
   const [time, setTime] = useState(() => new Date().toLocaleTimeString('en-AU', { hour12: false }))
@@ -51,6 +52,44 @@ export const StatusBar = () => {
 
   const [showNameplates, setShowNameplates] = useState(false)
   const [showPrograms, setShowPrograms] = useState(false)
+
+  const released = !!dryer.released
+
+  // PLC-release PIN modal state
+  const [pinOpen, setPinOpen] = useState(false)
+  const [pin, setPin] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const closePin = () => {
+    setPinOpen(false)
+    setPin('')
+    setErr(null)
+    setBusy(false)
+  }
+
+  const submitPin = async () => {
+    if (busy) return
+    setBusy(true)
+    setErr(null)
+    try {
+      await api.releasePlc(pin)
+      closePin()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setErr(msg.includes('403') ? 'Incorrect PIN' : 'Release failed — try again')
+      setPin('')
+      setBusy(false)
+    }
+  }
+
+  const reconnect = async () => {
+    try {
+      await api.takePlc()
+    } catch {
+      /* poll loop will reconnect on its own shortly */
+    }
+  }
 
   return (
     <>
@@ -171,6 +210,31 @@ export const StatusBar = () => {
       {/* Divider */}
       <span className="text-gray-600 text-2xl font-thin">|</span>
 
+      {/* PLC release / reconnect */}
+      {released && (
+        <span className="px-3 py-1 rounded bg-red-600 text-white text-base font-extrabold tracking-wide uppercase animate-pulse">
+          Released — MEB has PLC
+        </span>
+      )}
+      {released ? (
+        <button
+          onClick={reconnect}
+          className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 active:bg-green-700 text-white font-bold text-lg leading-none shadow-lg"
+        >
+          ⟳ Reconnect PLC
+        </button>
+      ) : (
+        <button
+          onClick={() => setPinOpen(true)}
+          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white font-bold text-lg leading-none shadow-lg"
+        >
+          ⏏ Release PLC
+        </button>
+      )}
+
+      {/* Divider */}
+      <span className="text-gray-600 text-2xl font-thin">|</span>
+
       {/* Clock */}
       <span className="font-mono font-bold text-xl text-gray-200 tabular-nums tracking-widest">
         {clock}
@@ -180,6 +244,80 @@ export const StatusBar = () => {
       {/* Modals */}
       {showNameplates && <VsdNameplates onClose={() => setShowNameplates(false)} />}
       {showPrograms && <VsdPrograms onClose={() => setShowPrograms(false)} />}
+
+      {/* PIN modal — release the PLC link for MEB */}
+      {pinOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          onClick={closePin}
+        >
+          <div
+            className="bg-gray-900 border-2 border-gray-600 rounded-2xl p-6 w-[360px] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-gray-100 text-2xl font-bold mb-1 text-center">Release PLC</div>
+            <div className="text-gray-400 text-sm mb-4 text-center leading-snug">
+              Enter the maintenance PIN to drop the HMI's PLC link so MEB can
+              upload. The dryer keeps running — this does not stop equipment.
+            </div>
+
+            {/* PIN display */}
+            <div className="h-14 mb-3 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center tracking-[0.5em] text-3xl font-mono text-gray-100">
+              {pin ? pin.replace(/./g, '•') : <span className="text-gray-600 tracking-normal text-lg">PIN</span>}
+            </div>
+
+            {err && <div className="text-red-400 text-center font-semibold mb-2">{err}</div>}
+
+            {/* Keypad */}
+            <div className="grid grid-cols-3 gap-2">
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setPin((p) => (p.length < 8 ? p + d : p))}
+                  className="py-4 rounded-lg bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-2xl font-bold text-gray-100"
+                >
+                  {d}
+                </button>
+              ))}
+              <button
+                onClick={() => { setPin(''); setErr(null) }}
+                className="py-4 rounded-lg bg-gray-800 hover:bg-gray-700 text-lg font-bold text-gray-300"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setPin((p) => (p.length < 8 ? p + '0' : p))}
+                className="py-4 rounded-lg bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-2xl font-bold text-gray-100"
+              >
+                0
+              </button>
+              <button
+                onClick={() => setPin((p) => p.slice(0, -1))}
+                className="py-4 rounded-lg bg-gray-800 hover:bg-gray-700 text-lg font-bold text-gray-300"
+              >
+                ⌫
+              </button>
+            </div>
+
+            {/* Actions */}
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <button
+                onClick={closePin}
+                className="py-3 rounded-lg bg-gray-700 hover:bg-gray-600 text-lg font-bold text-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitPin}
+                disabled={busy || pin.length < 4}
+                className="py-3 rounded-lg bg-amber-600 hover:bg-amber-500 active:bg-amber-700 disabled:opacity-40 text-lg font-bold text-white"
+              >
+                {busy ? '…' : 'Release'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

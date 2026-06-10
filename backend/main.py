@@ -15,6 +15,7 @@ from app.websocket_handler import setup_websocket, manager
 from app.poll_loop import poll_loop, get_latest_state
 from app.logging_task import logging_task
 from app.license import LicenseManager
+from app import plc_gate
 from config import Settings
 
 logging.basicConfig(level=logging.INFO)
@@ -137,6 +138,10 @@ class SetpointRequest(BaseModel):
     value_c: float
 
 
+class PinRequest(BaseModel):
+    pin: str
+
+
 # ---------------------------------------------------------------------------
 # REST endpoints
 # ---------------------------------------------------------------------------
@@ -233,6 +238,50 @@ async def set_operator_setpoint(req: SetpointRequest):
         raise HTTPException(status_code=502, detail="PLC write failed")
 
     return {"ok": True, "key": req.key, "value_c": round(raw / 10.0, 1), "raw": raw}
+
+
+# ---------------------------------------------------------------------------
+# PLC release / take — PIN-gated maintenance release of the HMI's PLC link so
+# Schneider MEB (single UMAS master) can take the PLC for a program upload.
+# No-sabotage: releasing NEVER stops running equipment; it only drops the link.
+# ---------------------------------------------------------------------------
+
+@app.post("/api/plc/release")
+async def plc_release(req: PinRequest):
+    if req.pin != settings.PLC_RELEASE_PIN:
+        raise HTTPException(status_code=403, detail="Incorrect PIN")
+    plc_gate.set_released(True)
+    try:
+        await plc_client.close()
+    except Exception as e:
+        logger.warning(f"PLC close during release: {e}")
+    logger.info("PLC released by operator (PIN ok) — HMI link dropped for MEB")
+    return {"ok": True, "released": True}
+
+
+@app.post("/api/plc/take")
+async def plc_take():
+    """Re-acquire the PLC after a release (e.g. once MEB has disconnected).
+    The poll loop resumes polling and reconnects on its own as well."""
+    plc_gate.set_released(False)
+    try:
+        await plc_client.connect()
+    except Exception as e:
+        logger.warning(f"PLC reconnect during take: {e}")
+    logger.info("PLC re-acquired by HMI (release cleared)")
+    return {
+        "ok": True,
+        "released": False,
+        "connected": plc_client.is_connected if plc_client else False,
+    }
+
+
+@app.get("/api/plc/released")
+async def plc_released_status():
+    return {
+        "released": plc_gate.is_released(),
+        "connected": plc_client.is_connected if plc_client else False,
+    }
 
 
 # Serve the built React frontend if it exists.

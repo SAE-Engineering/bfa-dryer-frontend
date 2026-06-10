@@ -49,6 +49,7 @@ from app.components import (
     SETPOINT_REG_MAP,
     REG_BURNER_SP,
 )
+from app import plc_gate
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,16 @@ async def poll_loop(client, manager, settings, license_mgr=None):
 
     while True:
         try:
+            # Released for MEB: do NOT touch the PLC (the umas client would
+            # auto-reconnect on any read and steal the link back). Serve a
+            # 'released' state so the HMI shows the banner + Reconnect button.
+            if plc_gate.is_released():
+                state = _released_state(settings, license_mgr)
+                _latest_state = state
+                await manager.broadcast(state)
+                await asyncio.sleep(interval)
+                continue
+
             proto = getattr(settings, "PLC_PROTO", "modbus").lower()
             if not settings.PLC_SIM and proto == "umas":
                 state = await _build_state_umas(client, settings, license_mgr)
@@ -80,6 +91,41 @@ async def poll_loop(client, manager, settings, license_mgr=None):
         except Exception as e:
             logger.error(f"Poll loop error: {e}")
         await asyncio.sleep(interval)
+
+
+def _released_state(settings, license_mgr=None) -> dict:
+    """State served while the PLC link is released for MEB — connected False,
+    released True, equipment indicators zeroed. The PLC keeps running its
+    program; this only reflects that the HMI has dropped its read/write link."""
+    state = {
+        "type":       "state",
+        "ts":         datetime.now(timezone.utc).isoformat(),
+        "connected":  False,
+        "released":   True,
+        "sim":        settings.PLC_SIM,
+        "safety_ok":  True,
+        "fan_proven": False,
+        "components": [
+            {
+                "id":        c.id,
+                "label":     c.label,
+                "kind":      c.kind,
+                "has_speed": c.has_speed,
+                "manual":    c.manual,
+                "cmd":       False,
+                "running":   False,
+                "fault":     False,
+                "speed_pct": 0.0,
+            }
+            for c in COMPONENTS
+        ],
+        "temps":     {"hotfan_motor": 0.0, "burner": 0.0, "product1": 0.0,
+                      "product2": 0.0, "exhaust": 0.0},
+        "setpoints": {"burner_hi_lo": 0.0, "burner_lo_off": 0.0, "product_max": 0.0},
+    }
+    if license_mgr is not None:
+        state["license"] = license_mgr.status().as_dict()
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +198,7 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
         "type":       "state",
         "ts":         datetime.now(timezone.utc).isoformat(),
         "connected":  connected,
+        "released":   plc_gate.is_released(),
         "sim":        settings.PLC_SIM,
         "safety_ok":  safety_ok,
         "fan_proven": fan_proven,
@@ -249,6 +296,7 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
         "type":       "state",
         "ts":         datetime.now(timezone.utc).isoformat(),
         "connected":  client.is_connected,
+        "released":   plc_gate.is_released(),
         "sim":        settings.PLC_SIM,
         "safety_ok":  safety_ok,
         "fan_proven": fan_proven,
