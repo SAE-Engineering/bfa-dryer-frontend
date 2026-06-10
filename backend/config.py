@@ -28,6 +28,28 @@ class Settings(BaseSettings):
     LICENSE_REQUIRE_MACHINE: bool = True
     MACHINE_ID: str = ""        # blank -> falls back to the host name at startup
 
+    # Acceptance logging
+    # Directory for daily JSONL acceptance logs (Docker: mount a volume here)
+    ACCEPTANCE_LOG_DIR: str = "/app/acceptance-logs"
+
+    # Resend email notification on each acceptance (pay-to-play gate).
+    # When BILLING_PAID=true the email is skipped (perpetual licence path).
+    # TODO: set RESEND_API_KEY to the value from ~/.claude/secrets/resend.env
+    #       (use RESEND_FULL_API_KEY for full send permissions).
+    RESEND_API_KEY: str = ""
+    # TODO: verify saee.com.au as a Resend sender domain, then set this.
+    #       If not verified, use "noreply@saebooks.com.au" instead.
+    RESEND_FROM: str = "noreply@saee.com.au"
+    BILLING_PAID: bool = False  # true → skip acceptance email
+
+    # 2-minute operational run logger
+    RUN_LOG_DIR: str = "/app/run-logs"
+    RUN_LOG_INTERVAL_S: int = 120
+
+    # PIN for master PLC release (long-press logo → PIN pad → release)
+    # TODO: Change from default before live deployment if needed.
+    PLC_RELEASE_PIN: str = "8800"
+
     # Server / dev settings
     DEBUG: bool = False
     HOST: str = "0.0.0.0"

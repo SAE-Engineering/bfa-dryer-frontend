@@ -1,5 +1,8 @@
 // Top status bar: SAE logo, connection, SIM badge, Safety OK, Fan proven, logging indicator, clock.
 // Designed for 1920×1200 @224 PPI industrial panel — text/LEDs large enough to read at a glance.
+//
+// Long-press the SAE logo (1.2s) to open the PIN-gated master PLC release modal.
+// The parent (App.tsx) owns the timer and fires onLogoPointerDown/Up/Cancel.
 
 import { useEffect, useState } from 'react'
 import { useControlStore } from '../store/controlStore'
@@ -16,7 +19,17 @@ function useClock() {
   return time
 }
 
-export const StatusBar = () => {
+interface StatusBarProps {
+  onLogoPointerDown?: () => void
+  onLogoPointerUp?: () => void
+  onLogoPointerCancel?: () => void
+}
+
+export const StatusBar = ({
+  onLogoPointerDown,
+  onLogoPointerUp,
+  onLogoPointerCancel,
+}: StatusBarProps) => {
   const dryer = useControlStore((s) => s.dryer)
   const wsStatus = useControlStore((s) => s.wsStatus)
   const clock = useClock()
@@ -51,8 +64,21 @@ export const StatusBar = () => {
       className="flex items-center gap-6 px-5 bg-gray-900 border-b-2 border-gray-700 select-none shrink-0"
       style={{ height: '9vh', minHeight: '68px', maxHeight: '88px' }}
     >
-      {/* SAE Engineering logo — light pill backing so navy SVG reads on dark bg */}
+      {/* SAE Engineering logo
+          Long-press (1.2s) → PIN modal → master PLC release.
+          The touch handlers are wired from App.tsx to keep timer state there.
+          sae-logo.png lives in frontend/public/ — served as /sae-logo.png by both
+          Vite dev server and the production nginx/StaticFiles mount.
+
+          FIX (feat/splash-licence): logo was missing from frontend/dist/ because the
+          stale dist build pre-dated the public/ asset. Resolved: dist is rebuilt on
+          deploy — `npm run build` copies public/ into dist/ automatically via Vite.
+      */}
       <div
+        onPointerDown={onLogoPointerDown}
+        onPointerUp={onLogoPointerUp}
+        onPointerLeave={onLogoPointerCancel}
+        onPointerCancel={onLogoPointerCancel}
         style={{
           background: 'rgba(255,255,255,0.10)',
           borderRadius: '10px',
@@ -60,12 +86,31 @@ export const StatusBar = () => {
           display: 'flex',
           alignItems: 'center',
           flexShrink: 0,
+          cursor: 'pointer',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          touchAction: 'manipulation',
         }}
+        title="Long-press to access master release"
       >
         <img
           src="/sae-logo.png"
           alt="SAE Engineering"
-          style={{ height: '48px', width: 'auto', display: 'block' }}
+          style={{ height: '48px', width: 'auto', display: 'block', pointerEvents: 'none' }}
+          draggable={false}
+          onError={(e) => {
+            // Fallback: render text if image fails to load
+            const img = e.currentTarget as HTMLImageElement
+            img.style.display = 'none'
+            const parent = img.parentElement
+            if (parent && !parent.querySelector('.logo-fallback')) {
+              const span = document.createElement('span')
+              span.className = 'logo-fallback'
+              span.style.cssText = 'font-size:18px;font-weight:900;color:#f1f5f9;letter-spacing:0.05em;'
+              span.textContent = 'SAE'
+              parent.appendChild(span)
+            }
+          }}
         />
       </div>
 
@@ -140,7 +185,7 @@ export const StatusBar = () => {
             loggingActive ? 'text-blue-300' : 'text-gray-500'
           }`}
         >
-          {loggingActive ? 'Logging ✓' : 'Logging —'}
+          {loggingActive ? 'Logging' : 'Logging —'}
         </span>
       </div>
 

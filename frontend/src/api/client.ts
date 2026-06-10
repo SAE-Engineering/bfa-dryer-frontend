@@ -22,6 +22,18 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function postEmpty<T>(path: string): Promise<T> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  })
+  if (!res.ok) {
+    throw new Error(`POST ${path} failed: ${res.status} ${res.statusText}`)
+  }
+  return res.json() as Promise<T>
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path)
   if (!res.ok) {
@@ -46,4 +58,20 @@ export const api = {
   getState: () => get<DryerState>('/api/state'),
 
   getHealth: () => get<HealthResponse>('/api/health'),
+
+  // Operator acceptance — POST on splash screen accept tap
+  postAcceptance: () =>
+    postEmpty<{ ok: boolean; ts: string; machine_id: string }>('/api/acceptance'),
+
+  // PLC release — PIN-gated; disconnects UMAS so MEB can take the PLC
+  plcRelease: (pin: string) =>
+    post<{ ok: boolean; released: boolean; message: string }>('/api/plc/release', { pin }),
+
+  // PLC take — attempt to re-acquire PLC after release; auto-retried by frontend
+  plcTake: () =>
+    postEmpty<{ ok: boolean; connected: boolean; message: string }>('/api/plc/take'),
+
+  // PLC released status
+  plcReleasedStatus: () =>
+    get<{ released: boolean; connected: boolean }>('/api/plc/released'),
 }
