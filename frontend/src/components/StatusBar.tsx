@@ -1,8 +1,11 @@
 // Top status bar: SAE logo, connection, SIM badge, Safety OK, Fan proven, logging indicator, clock.
+// VSD reference buttons: Nameplates + Commissioning Programs.
 // Designed for 1920×1200 @224 PPI industrial panel — text/LEDs large enough to read at a glance.
 
 import { useEffect, useState } from 'react'
 import { useControlStore } from '../store/controlStore'
+import { VsdNameplates } from './VsdNameplates'
+import { VsdPrograms } from './VsdPrograms'
 
 function useClock() {
   const [time, setTime] = useState(() => new Date().toLocaleTimeString('en-AU', { hour12: false }))
@@ -46,7 +49,11 @@ export const StatusBar = () => {
 
   const loggingActive = wsStatus === 'open' && dryer.connected
 
+  const [showNameplates, setShowNameplates] = useState(false)
+  const [showPrograms, setShowPrograms] = useState(false)
+
   return (
+    <>
     <div
       className="flex items-center gap-6 px-5 bg-gray-900 border-b-2 border-gray-700 select-none shrink-0"
       style={{ height: '9vh', minHeight: '68px', maxHeight: '88px' }}
@@ -83,6 +90,23 @@ export const StatusBar = () => {
       )}
 
       <div className="flex-1" />
+
+      {/* VSD reference buttons */}
+      <button
+        onClick={() => setShowNameplates(true)}
+        className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-gray-600 bg-gray-800/60 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+      >
+        VSD Nameplates
+      </button>
+      <button
+        onClick={() => setShowPrograms(true)}
+        className="px-3 py-1.5 rounded-lg text-sm font-semibold border border-cyan-700/60 bg-cyan-900/20 text-cyan-300 hover:bg-cyan-900/40 hover:text-cyan-100 transition-colors"
+      >
+        VSD Programs
+      </button>
+
+      {/* Divider */}
+      <span className="text-gray-600 text-2xl font-thin">|</span>
 
       {/* Safety OK */}
       <div className="flex items-center gap-2.5">
@@ -152,5 +176,10 @@ export const StatusBar = () => {
         {clock}
       </span>
     </div>
+
+      {/* Modals */}
+      {showNameplates && <VsdNameplates onClose={() => setShowNameplates(false)} />}
+      {showPrograms && <VsdPrograms onClose={() => setShowPrograms(false)} />}
+    </>
   )
 }
