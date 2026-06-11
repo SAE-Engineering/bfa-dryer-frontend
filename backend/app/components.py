@@ -112,24 +112,28 @@ TEMP_REGS = {
     "exhaust":      34,
 }
 
-# Burner setpoints — readable; %MW45 = burner air setpoint (e.g. 850 = 85.0 °C)
-REG_BURNER_SP       = 45  # %MW45 — burner air setpoint (read-only display)
-REG_SP_BURNER_HI_LO  = 46  # %MW46
-REG_SP_BURNER_LO_OFF = 47  # %MW47
-REG_SP_PRODUCT_MAX   = 48  # %MW48
+# Burner setpoints — match the loaded MANUAL program (BFD_manual):
+#   %MW45 = burner air TARGET setpoint   (850 = 85.0 °C)
+#   %MW46 = burner hysteresis band ±     (20 = 2.0 °C; ON below target-band, OFF above target+band)
+#   %MW49 = product scorch trip          (Prod1/Prod2 ≥ this → burner OFF; 920 = 92.0 °C)
+# SAFETY: %MW47 (any-sensor over-temp) and %MW51 (fire/fan-kill) are deliberately
+#         NOT operator-settable from the HMI — set first-scan only by the ladder.
+REG_BURNER_SP    = 45  # %MW45 — burner air target setpoint
+REG_BURNER_BAND  = 46  # %MW46 — burner hysteresis band ±
+REG_PRODUCT_MAX  = 49  # %MW49 — product scorch trip → burner OFF
 
 # Default setpoint values (°C) used to seed the sim register bank
 SP_DEFAULTS = {
-    "burner_hi_lo":  85.0,
-    "burner_lo_off": 96.0,
+    "burner_target": 85.0,
+    "burner_band":   2.0,
     "product_max":   92.0,
 }
 
 # Key → register address mapping (for REST handler)
 SETPOINT_REG_MAP: dict[str, int] = {
-    "burner_hi_lo":  REG_SP_BURNER_HI_LO,
-    "burner_lo_off": REG_SP_BURNER_LO_OFF,
-    "product_max":   REG_SP_PRODUCT_MAX,
+    "burner_target": REG_BURNER_SP,
+    "burner_band":   REG_BURNER_BAND,
+    "product_max":   REG_PRODUCT_MAX,
 }
 
 # Bit flags — these come from %MW0 on this PLC (no separate status word)

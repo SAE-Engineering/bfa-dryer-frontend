@@ -220,7 +220,7 @@ async def burner_setpoint(req: BurnerSetpointRequest):
 async def set_operator_setpoint(req: SetpointRequest):
     """Write an operator temperature setpoint to the matching holding register.
 
-    key ∈ {"burner_hi_lo", "burner_lo_off", "product_max"}
+    key ∈ {"burner_target", "burner_band", "product_max"}
     value_c in °C — stored as °C×10 in the register, clamped 0..2000.
     """
     reg = SETPOINT_REG_MAP.get(req.key)

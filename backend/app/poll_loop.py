@@ -121,7 +121,7 @@ def _released_state(settings, license_mgr=None) -> dict:
         ],
         "temps":     {"hotfan_motor": 0.0, "burner": 0.0, "product1": 0.0,
                       "product2": 0.0, "exhaust": 0.0},
-        "setpoints": {"burner_hi_lo": 0.0, "burner_lo_off": 0.0, "product_max": 0.0},
+        "setpoints": {"burner_target": 0.0, "burner_band": 0.0, "product_max": 0.0},
     }
     if license_mgr is not None:
         state["license"] = license_mgr.status().as_dict()
@@ -134,10 +134,10 @@ def _released_state(settings, license_mgr=None) -> dict:
 
 async def _build_state_umas(client, settings, license_mgr=None) -> dict:
     """
-    UMAS path: read %MW0,31,32,33,34,45 in one burst.
+    UMAS path: read %MW0,31,32,33,34,45,46,49 in one burst.
     %MW0 = command word; cmd==running (ladder wires %Q = %MW0:Xn directly).
     """
-    addrs = [0, 31, 32, 33, 34, 45]
+    addrs = [0, 31, 32, 33, 34, 45, 46, 49]
     regs = await client.read_many(addrs)
 
     if regs is None:
@@ -145,12 +145,16 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
         cmd_word = 0
         temps_raw = {31: 0, 32: 0, 33: 0, 34: 0}
         burner_sp_raw = 0
+        band_raw = 0
+        product_raw = 0
         connected = False
     else:
         cmd_word = regs.get(0, 0)
         temps_raw = {31: regs.get(31, 0), 32: regs.get(32, 0),
                      33: regs.get(33, 0), 34: regs.get(34, 0)}
         burner_sp_raw = regs.get(45, 0)
+        band_raw = regs.get(46, 0)
+        product_raw = regs.get(49, 0)
         connected = True
 
     # On this PLC cmd == running (no separate running word)
@@ -185,13 +189,12 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
         "exhaust":      round(temps_raw[34] / 10.0, 1),
     }
 
-    # Setpoints from %MW45-48 — display only; we already have MW45 from the burst.
-    # MW46-48 are not in our burst; read them separately if needed.
-    # For now expose burner air setpoint from MW45.
+    # Setpoints from the burst — manual program registers:
+    #   %MW45 burner target, %MW46 hysteresis band, %MW49 product scorch trip.
     setpoints = {
-        "burner_hi_lo":  round(burner_sp_raw / 10.0, 1),
-        "burner_lo_off": 0.0,
-        "product_max":   0.0,
+        "burner_target": round(burner_sp_raw / 10.0, 1),
+        "burner_band":   round(band_raw / 10.0, 1),
+        "product_max":   round(product_raw / 10.0, 1),
     }
 
     state = {
@@ -283,7 +286,7 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
 
     # Read operator setpoint registers
     sp_reg_addrs = list(SETPOINT_REG_MAP.values())
-    sp_regs_raw = await client.read_holding_registers(min(sp_reg_addrs), len(sp_reg_addrs))
+    sp_regs_raw = await client.read_holding_registers(min(sp_reg_addrs), max(sp_reg_addrs) - min(sp_reg_addrs) + 1)
     setpoints: dict[str, float] = {}
     base = min(sp_reg_addrs)
     for key, reg in SETPOINT_REG_MAP.items():

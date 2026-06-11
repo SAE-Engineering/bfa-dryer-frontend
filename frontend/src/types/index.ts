@@ -24,8 +24,8 @@ export interface Temps {
 }
 
 export interface Setpoints {
-  burner_hi_lo: number
-  burner_lo_off: number
+  burner_target: number
+  burner_band: number
   product_max: number
 }
 

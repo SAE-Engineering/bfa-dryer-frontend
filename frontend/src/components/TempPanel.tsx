@@ -464,8 +464,8 @@ export const TempPanel = ({ temps, setpoints }: TempPanelProps) => {
         <SetpointModal
           title="Burner Setpoints"
           fields={[
-            { label: 'High-fire below (°C)', key: 'burner_hi_lo', value: setpoints.burner_hi_lo },
-            { label: 'Low-fire / off above (°C)', key: 'burner_lo_off', value: setpoints.burner_lo_off },
+            { label: 'Burner target (°C)', key: 'burner_target', value: setpoints.burner_target },
+            { label: 'Hysteresis band ± (°C)', key: 'burner_band', value: setpoints.burner_band },
           ]}
           onSave={handleSave}
           onClose={() => setOpenModal(null)}

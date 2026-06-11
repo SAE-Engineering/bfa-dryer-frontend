@@ -11,8 +11,8 @@ const DEFAULT_TEMPS: Temps = {
 }
 
 const DEFAULT_SETPOINTS: Setpoints = {
-  burner_hi_lo: 85.0,
-  burner_lo_off: 96.0,
+  burner_target: 85.0,
+  burner_band: 2.0,
   product_max: 92.0,
 }
 
