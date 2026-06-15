@@ -348,24 +348,30 @@ async def diag():
             mw[str(a)] = None
 
     # --- %M bits -----------------------------------------------------------
+    # NOTE: read_bits() does NOT chunk internally (unlike read_many), and the
+    # M221 caps a single 0x24 multi-read at 10 variables -- it silently returns
+    # only the first 10.  So we chunk the %M reads here (<=8, matching the
+    # read_many margin) and merge.  umas_client is left untouched.
     if can_read_m:
-        try:
-            res = await client.read_bits(DIAG_M_ADDRS)
-            if res is None:
-                errors.append("read_bits returned None (PLC read failed)")
-                for a in DIAG_M_ADDRS:
+        for off in range(0, len(DIAG_M_ADDRS), 8):
+            chunk = DIAG_M_ADDRS[off:off + 8]
+            try:
+                res = await client.read_bits(chunk)
+                if res is None:
+                    errors.append(f"read_bits returned None for {chunk}")
+                    for a in chunk:
+                        m[str(a)] = None
+                else:
+                    for a in chunk:
+                        m[str(a)] = res.get(a)
+                        if a not in res:
+                            errors.append(f"%M{a} missing from read_bits result")
+            except Exception as e:
+                errors.append(f"read_bits error {chunk}: {e}")
+                for a in chunk:
                     m[str(a)] = None
-            else:
-                for a in DIAG_M_ADDRS:
-                    m[str(a)] = res.get(a)
-                    if a not in res:
-                        errors.append(f"%M{a} missing from read_bits result")
-        except Exception as e:
-            errors.append(f"read_bits error: {e}")
-            for a in DIAG_M_ADDRS:
-                m[str(a)] = None
     else:
-        errors.append("client has no read_bits (sim/modbus path) — %M unavailable")
+        errors.append("client has no read_bits (sim/modbus path) -- %M unavailable")
         for a in DIAG_M_ADDRS:
             m[str(a)] = None
 
