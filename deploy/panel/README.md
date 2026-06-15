@@ -31,6 +31,15 @@ Default `PLC_SIM=true` — nothing physical moves. **To arm live control of the 
 (on-site, attended only):** edit `.env` -> `PLC_SIM=false`, then
 `docker compose -f docker-compose.yml -f docker-compose.panel.yml up -d`.
 
+`.env.panel.example` already sets **`PLC_PROTO=umas`** (the M221 needs UMAS — plain
+Modbus writes ACK but never apply, so a `modbus`-proto live run would look
+"connected" yet command nothing). If you build a `.env` by hand, the live profile
+is: `PLC_SIM=false`, `PLC_PROTO=umas`, `PLC_HOST=10.10.10.10`, `PLC_PORT=502`,
+`LOG_DIR=/data`. The HMI polls via UMAS `0x24` (incl. the `%M` safety/fault bits)
+and writes via `0x25`/`set_bit` — no reservation, so it coexists with the
+`BFAplc` read-protect (which only gates `0x28` program upload). **Verify once
+live:** the HMI still shows temps + safety with the read-protect set.
+
 ## Kiosk (X / openbox / epiphany)
 Required packages (the LAN has internet, so apt works directly):
 ```
