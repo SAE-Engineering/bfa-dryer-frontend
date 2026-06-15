@@ -36,3 +36,4 @@ data/*.csv
 **/*.pyc
 data/license.json
 data/.license_hw
+.venv/
