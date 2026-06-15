@@ -276,13 +276,8 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
 
   const startDisabled = locked && !cmd
 
-  // Control panel: the run indicator follows the COMMAND (immediate on tap), not
-  // the drive's feedback. Manual tiles key off `cmd`; auto/indication-only tiles
-  // still show the real `running` state (they are explicitly indicators). FAULT
-  // always wins (an exception the operator must see).
-  const indicatorOn = manual ? cmd : running
-  const borderColor = fault ? '#dc2626' : indicatorOn ? '#059669' : '#1f2937'
-  const cardBg = fault ? '#1a0505' : indicatorOn ? '#0a1f0f' : '#111827'
+  const borderColor = fault ? '#dc2626' : running ? '#059669' : cmd ? '#065f46' : '#1f2937'
+  const cardBg = fault ? '#1a0505' : running ? '#0a1f0f' : '#111827'
 
   // Tile is interactive (tappable) for manual components
   const tileInteractive = manual
@@ -343,16 +338,15 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
                 animation: 'pulse 1.5s ease-in-out infinite',
               }}>FAULT</span>
             )}
-            {/* Command LED — lit when the operator has commanded ON (immediate),
-                not when the drive feeds back that it's running. */}
+            {/* Running LED */}
             <span
               style={{
                 display: 'inline-block', width: '22px', height: '22px', borderRadius: '50%', flexShrink: 0,
-                background: indicatorOn ? '#4ade80' : '#374151',
-                border: `2px solid ${indicatorOn ? '#86efac' : '#4b5563'}`,
-                boxShadow: indicatorOn ? '0 0 10px rgba(74,222,128,0.8)' : 'none',
+                background: running ? '#4ade80' : '#374151',
+                border: `2px solid ${running ? '#86efac' : '#4b5563'}`,
+                boxShadow: running ? '0 0 10px rgba(74,222,128,0.8)' : 'none',
               }}
-              title={indicatorOn ? 'Commanded ON' : 'Off'}
+              title={running ? 'Running' : 'Stopped'}
             />
           </div>
         </div>
@@ -404,11 +398,9 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
             display: 'flex', alignItems: 'baseline', gap: '8px',
             borderTop: '1px solid #1f2937', paddingTop: '14px', pointerEvents: 'none',
           }}>
-            {/* SET speed (the operator's set-point from the backend command store),
-                NOT the drive's feedback Hz. Green when commanded ON. */}
             <span style={{
               fontFamily: 'monospace', fontSize: '72px', fontWeight: 900,
-              color: cmd ? '#34d399' : '#6b7280',
+              color: running ? '#34d399' : '#6b7280',
               fontVariantNumeric: 'tabular-nums', lineHeight: 1,
             }}>
               {speed_pct.toFixed(0)}

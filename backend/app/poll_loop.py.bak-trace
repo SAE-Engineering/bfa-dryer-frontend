@@ -51,21 +51,6 @@ from app.components import (
 )
 from app import plc_gate
 
-# VSD talkback comes from the serial converter (vsd_serial.vsd_state), populated
-# by the vsd_poll_loop task. Guard the import so the backend still starts if
-# pyserial is unavailable (e.g. a dev box without the converter).
-try:
-    from app.vsd_serial import (
-        vsd_state as VSD_STATE,
-        vsd_cmd as VSD_CMD,
-        cmd_clear_all_on,
-    )
-except Exception:  # noqa: BLE001
-    VSD_STATE = {}
-    VSD_CMD = {}
-    def cmd_clear_all_on():  # noqa: E704
-        pass
-
 logger = logging.getLogger(__name__)
 
 # Latest state — kept so GET /api/state can return without waiting for next poll
@@ -175,16 +160,6 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
     safety_ok  = True  # commissioning stand-in: no safety-status register in ladder yet; hardware relay is the real safety
     fan_proven = bool(running_word & (1 << BIT_FAN_PROVEN))
 
-    # Trace-chain contactor proof-of-run (--manual-modbus interlock):
-    #   %MW55 = 1 when the fan/lube contactor is proven (%I0.0 closed)
-    #   %MW58 = 1 when the interlock has TRIPPED (Trace running but contactor
-    #           not proven → the Trace VSD is stopped to protect the motor)
-    # SECOND read: the M221 caps a single UMAS multi-read at ~10 registers and the
-    # main burst above is already 10, so these must ride in their own request.
-    trace_regs = await client.read_many([55, 58]) if connected else None
-    trace_proven = bool(trace_regs.get(55, 0)) if trace_regs else False
-    trace_fault  = bool(trace_regs.get(58, 0)) if trace_regs else False
-
     components = []
     for comp in COMPONENTS:
         cmd     = bool(cmd_word     & (1 << comp.cmd_bit))
@@ -201,33 +176,6 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
             "fault":     fault,
             "speed_pct": (max(0.0, min(60.0, (regs.get(comp.speed_sp_reg, 0) if regs and comp.speed_sp_reg else 0) * 1.0)) if comp.has_speed else 0.0),
         })
-
-    # E-STOP: when safety drops, every commanded-high input goes LOW. (safety_ok is
-    # a placeholder=True until the M221 mirrors the safety-relay status %I0.13 to a
-    # readable %MW — once it does, this clears all RUN commands on E-stop.)
-    if not safety_ok:
-        cmd_clear_all_on()
-
-    # CONTROL PANEL — the vsd tiles show the OPERATOR'S COMMAND, not drive feedback:
-    #   cmd / speed come from the command store (immediate on tap / set);
-    #   only fault + online are kept from the drive (an exception must surface).
-    # Feedback running/Hz is deliberately NOT shown — this is a control panel, not a
-    # feedback panel (only the temps are feedback).
-    for cd in components:
-        if cd["kind"] == "vsd":
-            vs = VSD_STATE.get(cd["id"]) or {}
-            rec = VSD_CMD.get(cd["id"])
-            if rec is None:
-                # Not commanded yet this session — seed once from feedback so a
-                # backend restart doesn't show STOP while a drive is actually running.
-                rec = {"on": bool(vs.get("running")), "set_hz": float(vs.get("out_hz", 0.0))}
-                VSD_CMD[cd["id"]] = rec
-            cd["cmd"]        = bool(rec["on"])
-            cd["speed_pct"]  = float(rec["set_hz"])
-            cd["running"]    = bool(vs.get("running"))    # feedback, internal only
-            cd["fault"]      = bool(vs.get("fault"))
-            cd["fault_code"] = int(vs.get("code", 0))
-            cd["online"]     = bool(vs.get("online", False))
 
     temps = {
         "hotfan_motor": 0.0,                              # %MW30 sensor not wired
@@ -254,8 +202,6 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
         "sim":        settings.PLC_SIM,
         "safety_ok":  safety_ok,
         "fan_proven": fan_proven,
-        "trace_proven": trace_proven,
-        "trace_fault":  trace_fault,
         "components": components,
         "temps":      temps,
         "setpoints":  setpoints,

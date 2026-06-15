@@ -11,9 +11,7 @@ from pathlib import Path
 
 from app.components import COMPONENT_MAP, REG_CMD_WORD, REG_BURNER_SP, SETPOINT_REG_MAP
 from app.modbus_client import ModbusClient, SimulatedPlcClient
-from app.vsd_serial import (
-    VsdBus, AbbBus, vsd_poll_loop, VSD_NODE, ABB_NODE, cmd_set_on, cmd_set_hz,
-)
+from app.vsd_serial import VsdBus, vsd_poll_loop, VSD_NODE
 from app.umas_client import UmasMwClient
 from app.websocket_handler import setup_websocket, manager
 from app.poll_loop import poll_loop, get_latest_state
@@ -30,19 +28,9 @@ settings = Settings()
 # PLC client — selected at startup based on PLC_SIM / PLC_PROTO
 plc_client = None
 
-# VSD serial masters. vsd_bus = USB-RS485 converter (the 3 remaining Teco E510s).
-# abb_bus = dedicated RS232 lead to the ABB ACS355 that replaced the dead agitator1.
-# Either stays None if its serial port is unavailable.
+# VSD serial master (USB-RS485 converter) — drives the 4 Teco E510s directly,
+# independent of the M221. Stays None if the serial port is unavailable.
 vsd_bus = None
-abb_bus = None
-
-
-def _bus_node(cid: str):
-    """Route a component id to (bus, node): the ABB drive goes to abb_bus, every
-    other VSD to the Teco vsd_bus. Returns (None, None) if unknown/unavailable."""
-    if cid in ABB_NODE:
-        return abb_bus, ABB_NODE[cid]
-    return vsd_bus, VSD_NODE.get(cid)
 
 # Licence manager — offline kill-switch
 license_mgr = LicenseManager(
@@ -67,7 +55,7 @@ def _assert_unlocked():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global plc_client, vsd_bus, abb_bus
+    global plc_client, vsd_bus
 
     st = license_mgr.status()
     logger.info(f"Licence: machine_id={license_mgr.machine_id} status={st.status} "
@@ -97,38 +85,21 @@ async def lifespan(app: FastAPI):
         )
         await plc_client.connect()
 
-    # VSD serial masters (converter RS485 + ABB RS232) — optional; never fatal.
+    # VSD serial master (converter) — optional; never fatal if absent.
     vsd_task = None
     try:
         vsd_bus = VsdBus(
             port=os.environ.get("VSD_SERIAL_PORT", "/dev/ttyUSB0"),
             baud=int(os.environ.get("VSD_SERIAL_BAUD", "9600")),
         )
-        logger.info(f"Teco RS485 master on {vsd_bus.port} @ {vsd_bus.baud}")
-    except Exception as e:
-        vsd_bus = None
-        logger.warning(f"Teco RS485 master unavailable: {e}")
-
-    # ABB ACS355 on its own RS232 lead (replaces the dead agitator1). The port is
-    # only present once the USB-RS232 adapter is plugged in; absent = agitator1
-    # simply shows offline until the drive is connected + powered (answers node 5).
-    abb_port = os.environ.get("ABB_SERIAL_PORT")
-    if abb_port:
-        try:
-            abb_bus = AbbBus(
-                port=abb_port,
-                baud=int(os.environ.get("ABB_SERIAL_BAUD", "9600")),
-            )
-            logger.info(f"ABB ACS355 master on {abb_bus.port} @ {abb_bus.baud} (RS232)")
-        except Exception as e:
-            abb_bus = None
-            logger.warning(f"ABB RS232 master unavailable: {e}")
-
-    if vsd_bus is not None or abb_bus is not None:
         vsd_task = asyncio.create_task(
-            vsd_poll_loop(vsd_bus, abb_bus, float(os.environ.get("VSD_POLL_S", "1.0"))),
+            vsd_poll_loop(vsd_bus, float(os.environ.get("VSD_POLL_S", "1.0"))),
             name="vsd_poll",
         )
+        logger.info(f"VSD serial master on {vsd_bus.port} @ {vsd_bus.baud} (converter)")
+    except Exception as e:
+        vsd_bus = None
+        logger.warning(f"VSD serial master unavailable: {e}")
 
     # Background tasks
     poll_task = asyncio.create_task(
@@ -232,15 +203,12 @@ async def command(req: CommandRequest):
     if req.on:
         _assert_unlocked()
 
-    # VSDs are driven over the serial buses (Teco RS485 / ABB RS232), not the M221.
+    # VSDs are driven over the serial converter, not the M221.
     if comp.kind == "vsd":
-        bus, node = _bus_node(req.id)
-        if bus is None or node is None:
+        node = VSD_NODE.get(req.id)
+        if vsd_bus is None or node is None:
             raise HTTPException(status_code=503, detail="VSD serial master unavailable")
-        # Control-panel: record the command FIRST so the tile flips immediately,
-        # independent of how long the drive takes to spin up / stop.
-        cmd_set_on(req.id, req.on)
-        ok = await asyncio.to_thread(bus.run if req.on else bus.stop, node)
+        ok = await asyncio.to_thread(vsd_bus.run if req.on else vsd_bus.stop, node)
         if not ok:
             raise HTTPException(status_code=502, detail="VSD drive write failed")
         return {"ok": True, "id": req.id, "on": req.on}
@@ -262,16 +230,13 @@ async def set_speed(req: SpeedRequest):
 
     _assert_unlocked()
 
-    # VSDs: write the frequency straight to the drive over its bus (Hz).
+    # VSDs: write the frequency straight to the drive over the converter (Hz).
     if comp.kind == "vsd":
-        bus, node = _bus_node(req.id)
-        if bus is None or node is None:
+        node = VSD_NODE.get(req.id)
+        if vsd_bus is None or node is None:
             raise HTTPException(status_code=503, detail="VSD serial master unavailable")
         hz = max(0.0, min(50.0, float(req.value_pct)))
-        # Control-panel: record the setpoint so the tile shows the SET speed,
-        # not the drive's feedback Hz.
-        cmd_set_hz(req.id, hz)
-        ok = await asyncio.to_thread(bus.set_freq, node, hz)
+        ok = await asyncio.to_thread(vsd_bus.set_freq, node, hz)
         if not ok:
             raise HTTPException(status_code=502, detail="VSD drive write failed")
         return {"ok": True, "id": req.id, "value_pct": req.value_pct, "hz": hz}
@@ -370,17 +335,17 @@ async def plc_released_status():
 
 @app.post("/api/vsd/{cid}/reset")
 async def vsd_reset(cid: str):
-    bus, node = _bus_node(cid)
-    if bus is None or node is None:
+    node = VSD_NODE.get(cid)
+    if vsd_bus is None or node is None:
         raise HTTPException(status_code=503, detail="VSD serial master unavailable")
-    ok = await asyncio.to_thread(bus.reset_fault, node)
+    ok = await asyncio.to_thread(vsd_bus.reset_fault, node)
     return {"ok": ok, "id": cid, "node": node}
 
 
 @app.get("/api/vsd/{cid}/diag")
 async def vsd_diag(cid: str):
-    bus, node = _bus_node(cid)
-    if bus is None or node is None:
+    node = VSD_NODE.get(cid)
+    if vsd_bus is None or node is None:
         raise HTTPException(status_code=503, detail="VSD serial master unavailable")
     regs = {
         "00-02_run_src": 0x0002, "00-05_freq_src": 0x0005,
@@ -390,30 +355,30 @@ async def vsd_diag(cid: str):
         "out_freq_2524_x100": 0x2524, "out_curr_2527_x10": 0x2527,
         "dc_bus_2526_x10": 0x2526, "model_252F": 0x252F,
     }
-    out = {k: (await asyncio.to_thread(bus.read, node, r, 1)) for k, r in regs.items()}
+    out = {k: (await asyncio.to_thread(vsd_bus.read, node, r, 1)) for k, r in regs.items()}
     return {"id": cid, "node": node, "regs": out}
 
 
 @app.get("/api/vsd/{cid}/reg/{addr}")
 async def vsd_reg_read(cid: str, addr: str, count: int = 1):
     """Generic read-through to the drive. addr = hex ('0300' or '0x0300')."""
-    bus, node = _bus_node(cid)
-    if bus is None or node is None:
+    node = VSD_NODE.get(cid)
+    if vsd_bus is None or node is None:
         raise HTTPException(status_code=503, detail="VSD serial master unavailable")
     try:
         reg = int(addr, 16)
     except ValueError:
         raise HTTPException(status_code=400, detail="addr must be hex")
     count = max(1, min(int(count), 8))
-    vals = [await asyncio.to_thread(bus.read, node, reg + i, 1) for i in range(count)]
+    vals = [await asyncio.to_thread(vsd_bus.read, node, reg + i, 1) for i in range(count)]
     return {"id": cid, "node": node, "addr": f"0x{reg:04X}", "count": count, "values": vals}
 
 
 @app.post("/api/vsd/{cid}/reg/{addr}")
 async def vsd_reg_write(cid: str, addr: str, body: dict):
     """Generic parameter write (func-06). body = {"value": <int>}. Commissioning use."""
-    bus, node = _bus_node(cid)
-    if bus is None or node is None:
+    node = VSD_NODE.get(cid)
+    if vsd_bus is None or node is None:
         raise HTTPException(status_code=503, detail="VSD serial master unavailable")
     try:
         reg = int(addr, 16)
@@ -422,8 +387,8 @@ async def vsd_reg_write(cid: str, addr: str, body: dict):
     if "value" not in body:
         raise HTTPException(status_code=400, detail="body must include integer 'value'")
     value = int(body["value"])
-    ok = await asyncio.to_thread(bus.write, node, reg, value)
-    readback = await asyncio.to_thread(bus.read, node, reg, 1)
+    ok = await asyncio.to_thread(vsd_bus.write, node, reg, value)
+    readback = await asyncio.to_thread(vsd_bus.read, node, reg, 1)
     return {"ok": ok, "id": cid, "node": node, "addr": f"0x{reg:04X}",
             "wrote": value, "readback": readback}
 

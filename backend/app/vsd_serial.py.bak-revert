@@ -1,0 +1,296 @@
+"""
+Serial Modbus-RTU master for the four Teco E510 VSDs, via the panel USB-RS485
+converter on /dev/ttyUSB0.
+
+This is the PROVEN drive-control path (the teco_cli.py logic) moved into the HMI
+backend so the operator drives the VSDs straight from the screen — independent of
+the M221. The M221 is NOT on this bus (its SL1 puts no bytes on the wire), so the
+converter is the sole master here.
+
+  - /api/command (kind=vsd)  -> run() / stop()      (0x2501 operation word)
+  - /api/speed   (kind=vsd)  -> set_freq()          (0x2502 = Hz * 100)
+  - poll loop                -> read_status()        -> live talkback (run/fault/Hz)
+
+All serial access is serialised by a threading.Lock; async callers use
+asyncio.to_thread so the blocking pyserial calls never stall the event loop.
+"""
+
+import asyncio
+import logging
+import threading
+import time
+
+import serial
+
+logger = logging.getLogger(__name__)
+
+# E510 Modbus registers — see teco/E510_REGISTER_MAP.md (all empirically proven).
+REG_OP      = 0x2501   # operation word: bit0=run, bit1=reverse, bit3=fault-reset
+REG_FREQ    = 0x2502   # frequency command, 0.01 Hz units (value = Hz * 100)
+REG_STATUS  = 0x2520   # status word: bit0=run, bit2=ready, bit3=fault
+REG_FAULT   = 0x2521   # numeric fault code (NOT a bitfield)
+REG_FOUT    = 0x2524   # output frequency, 0.01 Hz units
+REG_IOUT    = 0x2527   # output current, 0.1 A units
+REG_P00_02  = 0x0002   # param 00-02 Main Run Cmd Source   (2 = Communication)
+REG_P00_05  = 0x0005   # param 00-05 Main Freq Cmd Source  (5 = Communication)
+
+# component id -> E510 bus node (address), on the Teco RS485 converter (ttyUSB0).
+# NOTE: agitator1 (the dead Teco E510 node 2) has been REPLACED by an ABB ACS355
+# on its own RS232 panel-port lead — see ABB_NODE / AbbBus below. So agitator1 is
+# no longer on this RS485 bus; only these three Tecos remain.
+VSD_NODE = {
+    "spinner":     5,
+    "agitator2":   3,
+    "trace_chain": 4,
+}
+
+# component id -> ABB ACS355 Modbus node, on the dedicated RS232 lead.
+# Point-to-point link, so the node is just the slave address the ACS355 answers on
+# (drive-setup agent saved it as 5; the drive answers on 5 after its next power-up).
+ABB_NODE = {
+    "agitator1": 5,
+}
+
+# Shared, latest talkback per component id — written by vsd_poll_loop(), read by
+# the state builder in poll_loop.py. {id: {online, running, fault, out_hz, code}}
+vsd_state: dict[str, dict] = {}
+
+# Commanded state per VSD — the CONTROL-PANEL truth: what the operator commanded,
+# NOT drive feedback. {id: {"on": bool, "set_hz": float}}. The tile's run indicator
+# and speed read from THIS (immediate on tap), so they reflect the command sent —
+# not whether the drive has spun up / picked up speed. Written by /api/command and
+# /api/speed; the poll-loop state builder copies it onto the vsd components.
+vsd_cmd: dict[str, dict] = {}
+
+
+def cmd_set_on(cid: str, on: bool) -> None:
+    vsd_cmd.setdefault(cid, {"on": False, "set_hz": 0.0})["on"] = bool(on)
+
+
+def cmd_set_hz(cid: str, hz: float) -> None:
+    vsd_cmd.setdefault(cid, {"on": False, "set_hz": 0.0})["set_hz"] = float(hz)
+
+
+def cmd_clear_all_on() -> None:
+    """E-STOP: drop every commanded-high input to LOW. Setpoints (set_hz) are kept
+    so the panel still shows the last set speed, but nothing is commanded RUN —
+    the operator must re-command after the stop is cleared (no auto-restart)."""
+    for rec in vsd_cmd.values():
+        rec["on"] = False
+
+
+def _crc16(data: bytes) -> int:
+    crc = 0xFFFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+    return crc
+
+
+class VsdBus:
+    """Minimal, thread-safe Modbus-RTU master (func 03 read / 06 write)."""
+
+    def __init__(self, port: str = "/dev/ttyUSB0", baud: int = 9600, timeout: float = 0.3):
+        self.port = port
+        self.baud = baud
+        self.timeout = timeout
+        self._lock = threading.Lock()
+        self._ser = None
+
+    def _open(self):
+        if self._ser is None:
+            self._ser = serial.Serial(
+                self.port, self.baud, bytesize=8, parity="N", stopbits=1,
+                timeout=self.timeout,
+            )
+        return self._ser
+
+    def _txn(self, frame: bytes, resp_len: int):
+        with self._lock:
+            try:
+                ser = self._open()
+                ser.reset_input_buffer()
+                ser.write(frame)
+                ser.flush()
+                return ser.read(resp_len)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"VSD serial txn error on {self.port}: {e}")
+                try:
+                    if self._ser:
+                        self._ser.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                self._ser = None
+                return None
+
+    def read(self, node: int, reg: int, count: int = 1):
+        req = bytes([node, 0x03, (reg >> 8) & 0xFF, reg & 0xFF,
+                     (count >> 8) & 0xFF, count & 0xFF])
+        c = _crc16(req)
+        resp = self._txn(req + bytes([c & 0xFF, (c >> 8) & 0xFF]), 5 + 2 * count)
+        if not resp or len(resp) < 5 + 2 * count:
+            return None
+        if _crc16(resp[:-2]) != (resp[-2] | (resp[-1] << 8)):
+            return None
+        if resp[0] != node or resp[1] != 0x03:
+            return None
+        vals = [(resp[3 + 2 * i] << 8) | resp[4 + 2 * i] for i in range(count)]
+        return vals[0] if count == 1 else vals
+
+    def write(self, node: int, reg: int, value: int) -> bool:
+        value &= 0xFFFF
+        req = bytes([node, 0x06, (reg >> 8) & 0xFF, reg & 0xFF,
+                     (value >> 8) & 0xFF, value & 0xFF])
+        c = _crc16(req)
+        resp = self._txn(req + bytes([c & 0xFF, (c >> 8) & 0xFF]), 8)
+        if not resp or len(resp) < 8:
+            return False
+        if _crc16(resp[:-2]) != (resp[-2] | (resp[-1] << 8)):
+            return False
+        return resp[0] == node and resp[1] == 0x06
+
+    # ----- high-level E510 operations -----
+
+    def ensure_comm(self, node: int):
+        """Make sure the drive takes run+freq from comm (00-02=2, 00-05=5).
+        Reads first and only writes if different, to avoid needless EEPROM wear."""
+        cur = self.read(node, REG_P00_02, 1)
+        if cur is not None and cur != 2:
+            self.write(node, REG_P00_02, 2)
+        cur = self.read(node, REG_P00_05, 1)
+        if cur is not None and cur != 5:
+            self.write(node, REG_P00_05, 5)
+
+    def set_freq(self, node: int, hz: float) -> bool:
+        hz = max(0.0, min(599.0, float(hz)))
+        return self.write(node, REG_FREQ, int(round(hz * 100)))
+
+    def run(self, node: int, hz: float | None = None) -> bool:
+        self.ensure_comm(node)
+        if hz is not None:
+            self.set_freq(node, hz)
+        return self.write(node, REG_OP, 0x0001)   # bit0 = run forward
+
+    def stop(self, node: int) -> bool:
+        return self.write(node, REG_OP, 0x0000)
+
+    def reset_fault(self, node: int) -> bool:
+        self.write(node, REG_OP, 0x0008)          # bit3 = fault reset
+        time.sleep(0.05)
+        return self.write(node, REG_OP, 0x0000)
+
+    def read_status(self, node: int):
+        st = self.read(node, REG_STATUS, 1)
+        if st is None:
+            return None
+        fout = self.read(node, REG_FOUT, 1)
+        code = self.read(node, REG_FAULT, 1)
+        return {
+            "online": True,
+            "running": bool(st & 0x0001),
+            "fault": bool(st & 0x0008),
+            "out_hz": round((fout or 0) / 100.0, 2),
+            "code": code or 0,
+        }
+
+
+# ---------------------------------------------------------------------------
+# ABB ACS355 — panel-port RS232, embedded Modbus RTU, DCU profile.
+# Interface contract from the drive-setup agent (~/acs355/spinner-acs355-params.txt).
+# Wire address = 4xxxx parameter number - 1 (zero-based holding registers).
+# Reuses VsdBus's generic func-03/06 framing; only the high-level ops differ.
+# ---------------------------------------------------------------------------
+ABB_REG_REF1  = 1      # 40002 REF1 reference, SIGNED: +/-20000 = +/-50.0 Hz
+ABB_REG_CW1   = 30     # 40031 DCU control word LSW
+ABB_REG_CW2   = 31     # 40032 DCU control word MSW
+ABB_REG_SW1   = 32     # 40033 DCU status word LSW
+ABB_REG_FOUT  = 102    # 40103 output frequency, 0.1 Hz units (signed)
+ABB_REG_IOUT  = 103    # 40104 motor current, 0.1 A units
+ABB_REG_FAULT = 400    # 40401 last fault code
+
+ABB_CW_RUN   = 0x0002  # START + run-enable + forward, ramp pair 1
+ABB_CW_STOP  = 0x0081  # STOP (ramp)
+ABB_CW_RESET = 0x0010  # fault reset (rising edge)
+
+ABB_REF_FULLSCALE = 20000   # counts at REF1_MAX
+ABB_REF_MAX_HZ    = 50.0
+ABB_SW_RUNNING = 1 << 3     # 40033 bit3 RUNNING
+ABB_SW_FAULT   = 1 << 15    # 40033 bit15 FAULT
+
+
+def _to_signed16(v: int) -> int:
+    return v - 0x10000 if v >= 0x8000 else v
+
+
+class AbbBus(VsdBus):
+    """ABB ACS355 master (DCU profile) on the dedicated RS232 lead.
+
+    Inherits the thread-safe func-03/06 Modbus framing from VsdBus; overrides the
+    high-level ops to speak the ACS355 control/status registers instead of E510."""
+
+    def ensure_comm(self, node: int):
+        # The ACS355 is already parameterised for comm control by the drive-setup
+        # agent (1001=10 EXT1=COMM, 1103=8 REF1=COMM, 5305=1 DCU, 9802=10 Modbus
+        # RS232). Do NOT rewrite ABB params from here — different param space.
+        return
+
+    def set_freq(self, node: int, hz: float) -> bool:
+        hz = max(-ABB_REF_MAX_HZ, min(ABB_REF_MAX_HZ, float(hz)))
+        ref = int(round(ABB_REF_FULLSCALE * hz / ABB_REF_MAX_HZ)) & 0xFFFF
+        return self.write(node, ABB_REG_REF1, ref)
+
+    def run(self, node: int, hz: float | None = None) -> bool:
+        if hz is not None:
+            self.set_freq(node, hz)
+        self.write(node, ABB_REG_CW2, 0x0000)
+        return self.write(node, ABB_REG_CW1, ABB_CW_RUN)
+
+    def stop(self, node: int) -> bool:
+        return self.write(node, ABB_REG_CW1, ABB_CW_STOP)
+
+    def reset_fault(self, node: int) -> bool:
+        self.write(node, ABB_REG_CW1, ABB_CW_RESET)   # rising edge on reset bit
+        time.sleep(0.05)
+        return self.write(node, ABB_REG_CW1, ABB_CW_STOP)
+
+    def read_status(self, node: int):
+        sw = self.read(node, ABB_REG_SW1, 1)
+        if sw is None:
+            return None
+        fout = self.read(node, ABB_REG_FOUT, 1)
+        code = self.read(node, ABB_REG_FAULT, 1)
+        return {
+            "online": True,
+            "running": bool(sw & ABB_SW_RUNNING),
+            "fault": bool(sw & ABB_SW_FAULT),
+            "out_hz": round(_to_signed16(fout or 0) / 10.0, 1),
+            "code": code or 0,
+        }
+
+
+_OFFLINE = {"online": False, "running": False, "fault": False, "out_hz": 0.0, "code": 0}
+
+
+async def vsd_poll_loop(bus: "VsdBus", abb_bus: "AbbBus | None" = None,
+                        interval: float = 1.0):
+    """Background task: refresh talkback for the Teco VSDs (+ the ABB) into
+    vsd_state. Each drive is read on its own bus; a dead/missing drive just shows
+    offline and never stalls the others."""
+    while True:
+        for cid, node in VSD_NODE.items():
+            try:
+                s = await asyncio.to_thread(bus.read_status, node)
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"VSD poll {cid} error: {e}")
+                s = None
+            vsd_state[cid] = s or dict(_OFFLINE)
+        if abb_bus is not None:
+            for cid, node in ABB_NODE.items():
+                try:
+                    s = await asyncio.to_thread(abb_bus.read_status, node)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug(f"ABB poll {cid} error: {e}")
+                    s = None
+                vsd_state[cid] = s or dict(_OFFLINE)
+        await asyncio.sleep(interval)

@@ -1,0 +1,11 @@
+{
+  "payload": {
+    "customer": "Banana Feeds Australia",
+    "machine_id": "bfa-hmi-01",
+    "issued": "2026-06-04T12:49:56+00:00",
+    "warn": "2027-05-31T12:49:56+00:00",
+    "expires": "2027-06-04T12:49:56+00:00",
+    "nonce": "e0bf69d6c783ae8e"
+  },
+  "sig": "ofj+TLyF2degfDRsvSM2Vv+Pbfc9wHa8VfqW3kyxDBaD8vSAEG2ZpoCvLBYFJ0ol4EBOYn+U4rfMpkaLu2JnDw=="
+}

@@ -6,11 +6,13 @@
 #  the bosun dev box also try to bind :80.)
 services:
   backend:
-    # Teco RS485 converter, pinned by stable USB by-id -> fixed in-container name
-    # so kernel ttyUSB enumeration order can't move it on reboot.
-    #   /dev/ttyTECO = FTDI FT232R USB-RS485 -> the 4 Teco E510s (incl. agitator1 node2).
-    #   /dev/ttyABB  = Prolific USB-RS232 -> ABB ACS355 agitator1 (node 2, DCU profile).
-    # Re-enabled 2026-06-12: ABB ACS355 replaces the dead agitator1 Teco E510.
+    # Two serial leads, pinned by stable USB by-id paths -> fixed in-container
+    # names, so kernel ttyUSB enumeration order (which can swap on reboot/replug)
+    # can never cross RS485 (Teco) with RS232 (ABB):
+    #   /dev/ttyTECO = FTDI FT232R USB-RS485  -> the 3 Teco E510s (spinner/ag2/trace)
+    #   /dev/ttyABB  = Prolific USB-RS232     -> the ABB ACS355 that replaced agitator1
+    # Both adapters are permanent panel fixtures; if a lead is unplugged the device
+    # node is absent and `up -d` will refuse to start until it's back.
     devices:
       - "/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_B000VA8O-if00-port0:/dev/ttyTECO"
       - "/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller_EPBPb147612-if00-port0:/dev/ttyABB"
@@ -18,6 +20,7 @@ services:
       - VSD_SERIAL_PORT=/dev/ttyTECO
       - VSD_SERIAL_BAUD=9600
       - ABB_SERIAL_PORT=/dev/ttyABB
+      - ABB_SERIAL_BAUD=9600
   frontend:
     ports:
       - "80:80"

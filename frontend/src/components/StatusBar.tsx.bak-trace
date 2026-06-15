@@ -166,33 +166,6 @@ export const StatusBar = () => {
       {/* Divider */}
       <span className="text-gray-600 text-2xl font-thin">|</span>
 
-      {/* Trace chain proof-of-run */}
-      <div className="flex items-center gap-2.5">
-        <span
-          className={`inline-block w-4 h-4 rounded-full shrink-0 ${
-            dryer.trace_fault
-              ? 'bg-red-500 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.9)]'
-              : dryer.trace_proven
-                ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]'
-                : 'bg-gray-600'
-          }`}
-        />
-        <span
-          className={`font-semibold text-lg leading-none ${
-            dryer.trace_fault
-              ? 'text-red-400'
-              : dryer.trace_proven
-                ? 'text-green-300'
-                : 'text-gray-500'
-          }`}
-        >
-          {dryer.trace_fault ? 'TRACE FAULT' : 'Trace'}
-        </span>
-      </div>
-
-      {/* Divider */}
-      <span className="text-gray-600 text-2xl font-thin">|</span>
-
       {/* Logging */}
       <div className="flex items-center gap-2.5">
         <span

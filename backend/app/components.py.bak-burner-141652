@@ -75,7 +75,7 @@ COMPONENTS: list[Component] = [
     Component("shaker",     "Shaker",               "dol",   False,  8,  8),
 
     # Automatic — status-only tiles; burner is ladder-controlled, no command
-    Component("burner",     "Burner",               "burner",False, 11, 11, manual=True),
+    Component("burner",     "Burner",               "burner",False, 11, 11, manual=False),
     Component("burner_high","Burner High",          "burner",False, 12, 12, manual=False),
 
     # VSDs — no ladder output wired yet; bits 2/3/9/10 are unused in ladder

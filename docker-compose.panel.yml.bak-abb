@@ -1,0 +1,17 @@
+# Panel (production) overlay for the on-machine HMI — Lenovo M700 "bfa-hmi-01".
+# Serves the frontend on host :80 so the kiosk browser hits http://localhost/.
+# Bring up on the panel with:
+#   docker compose -f docker-compose.yml -f docker-compose.panel.yml up -d --build
+# (Do NOT name this docker-compose.override.yml — that auto-merges and would make
+#  the bosun dev box also try to bind :80.)
+services:
+  backend:
+    # The on-panel backend talks to the USB-RS485 converter to drive the VSDs.
+    devices:
+      - "/dev/ttyUSB0:/dev/ttyUSB0"
+    environment:
+      - VSD_SERIAL_PORT=/dev/ttyUSB0
+      - VSD_SERIAL_BAUD=9600
+  frontend:
+    ports:
+      - "80:80"

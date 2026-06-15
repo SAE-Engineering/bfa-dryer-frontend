@@ -55,16 +55,9 @@ from app import plc_gate
 # by the vsd_poll_loop task. Guard the import so the backend still starts if
 # pyserial is unavailable (e.g. a dev box without the converter).
 try:
-    from app.vsd_serial import (
-        vsd_state as VSD_STATE,
-        vsd_cmd as VSD_CMD,
-        cmd_clear_all_on,
-    )
+    from app.vsd_serial import vsd_state as VSD_STATE
 except Exception:  # noqa: BLE001
     VSD_STATE = {}
-    VSD_CMD = {}
-    def cmd_clear_all_on():  # noqa: E704
-        pass
 
 logger = logging.getLogger(__name__)
 
@@ -202,32 +195,18 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
             "speed_pct": (max(0.0, min(60.0, (regs.get(comp.speed_sp_reg, 0) if regs and comp.speed_sp_reg else 0) * 1.0)) if comp.has_speed else 0.0),
         })
 
-    # E-STOP: when safety drops, every commanded-high input goes LOW. (safety_ok is
-    # a placeholder=True until the M221 mirrors the safety-relay status %I0.13 to a
-    # readable %MW — once it does, this clears all RUN commands on E-stop.)
-    if not safety_ok:
-        cmd_clear_all_on()
-
-    # CONTROL PANEL — the vsd tiles show the OPERATOR'S COMMAND, not drive feedback:
-    #   cmd / speed come from the command store (immediate on tap / set);
-    #   only fault + online are kept from the drive (an exception must surface).
-    # Feedback running/Hz is deliberately NOT shown — this is a control panel, not a
-    # feedback panel (only the temps are feedback).
+    # VSD live state comes from the serial converter, not the M221. Override the
+    # vsd components with converter talkback (running / fault / actual Hz).
     for cd in components:
         if cd["kind"] == "vsd":
-            vs = VSD_STATE.get(cd["id"]) or {}
-            rec = VSD_CMD.get(cd["id"])
-            if rec is None:
-                # Not commanded yet this session — seed once from feedback so a
-                # backend restart doesn't show STOP while a drive is actually running.
-                rec = {"on": bool(vs.get("running")), "set_hz": float(vs.get("out_hz", 0.0))}
-                VSD_CMD[cd["id"]] = rec
-            cd["cmd"]        = bool(rec["on"])
-            cd["speed_pct"]  = float(rec["set_hz"])
-            cd["running"]    = bool(vs.get("running"))    # feedback, internal only
-            cd["fault"]      = bool(vs.get("fault"))
-            cd["fault_code"] = int(vs.get("code", 0))
-            cd["online"]     = bool(vs.get("online", False))
+            vs = VSD_STATE.get(cd["id"])
+            if vs:
+                cd["running"]   = bool(vs.get("running"))
+                cd["fault"]     = bool(vs.get("fault"))
+                cd["cmd"]       = bool(vs.get("running"))   # tile reflects real drive state
+                cd["speed_pct"] = float(vs.get("out_hz", 0.0))
+                cd["fault_code"] = int(vs.get("code", 0))
+                cd["online"]     = bool(vs.get("online", False))
 
     temps = {
         "hotfan_motor": 0.0,                              # %MW30 sensor not wired

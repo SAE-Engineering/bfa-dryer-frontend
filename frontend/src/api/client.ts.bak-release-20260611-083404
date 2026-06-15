@@ -46,14 +46,4 @@ export const api = {
   getState: () => get<DryerState>('/api/state'),
 
   getHealth: () => get<HealthResponse>('/api/health'),
-
-  // PLC release/take — drop the HMI's PLC link so MEB can take it (PIN-gated).
-  releasePlc: (pin: string) =>
-    post<{ ok: boolean; released: boolean }>('/api/plc/release', { pin }),
-
-  takePlc: () =>
-    post<{ ok: boolean; released: boolean; connected: boolean }>('/api/plc/take', {}),
-
-  getReleased: () =>
-    get<{ released: boolean; connected: boolean }>('/api/plc/released'),
 }

@@ -9,15 +9,14 @@ services:
     # Teco RS485 converter, pinned by stable USB by-id -> fixed in-container name
     # so kernel ttyUSB enumeration order can't move it on reboot.
     #   /dev/ttyTECO = FTDI FT232R USB-RS485 -> the 4 Teco E510s (incl. agitator1 node2).
-    #   /dev/ttyABB  = Prolific USB-RS232 -> ABB ACS355 agitator1 (node 2, DCU profile).
-    # Re-enabled 2026-06-12: ABB ACS355 replaces the dead agitator1 Teco E510.
+    # The ABB ACS355 RS232 lead has been removed (Teco put back on agitator1); to
+    # re-enable, add its by-id device + ABB_SERIAL_PORT env back here and ABB_NODE in
+    # vsd_serial.py.
     devices:
       - "/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_B000VA8O-if00-port0:/dev/ttyTECO"
-      - "/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller_EPBPb147612-if00-port0:/dev/ttyABB"
     environment:
       - VSD_SERIAL_PORT=/dev/ttyTECO
       - VSD_SERIAL_BAUD=9600
-      - ABB_SERIAL_PORT=/dev/ttyABB
   frontend:
     ports:
       - "80:80"

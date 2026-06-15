@@ -75,15 +75,15 @@ COMPONENTS: list[Component] = [
     Component("shaker",     "Shaker",               "dol",   False,  8,  8),
 
     # Automatic — status-only tiles; burner is ladder-controlled, no command
-    Component("burner",     "Burner",               "burner",False, 11, 11, manual=True),
+    Component("burner",     "Burner",               "burner",False, 11, 11, manual=False),
     Component("burner_high","Burner High",          "burner",False, 12, 12, manual=False),
 
     # VSDs — no ladder output wired yet; bits 2/3/9/10 are unused in ladder
     # (writing them is harmless — no physical effect — included for future wiring)
-    Component("spinner",    "Spinner",              "vsd",   True,   2,  2,  speed_sp_reg=40),
-    Component("agitator1",  "Agitator 1",           "vsd",   True,   3,  3,  speed_sp_reg=41),
-    Component("agitator2",  "Agitator 2",           "vsd",   True,   9,  9,  speed_sp_reg=42),
-    Component("trace_chain","Trace Chain",          "vsd",   True,  10, 10,  speed_sp_reg=43),
+    Component("spinner",    "Spinner",              "vsd",   True,   2,  2,  speed_sp_reg=3),
+    Component("agitator1",  "Agitator 1",           "vsd",   True,   3,  3,  speed_sp_reg=4),
+    Component("agitator2",  "Agitator 2",           "vsd",   True,   9,  9,  speed_sp_reg=5),
+    Component("trace_chain","Trace Chain",          "vsd",   True,  10, 10,  speed_sp_reg=2),
 ]
 
 # Lookup by id

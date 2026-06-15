@@ -1,26 +1,19 @@
-import { useState } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { StatusBar } from './components/StatusBar'
 import { LicenseBanner } from './components/LicenseBanner'
-import { TraceBanner } from './components/TraceBanner'
 import { Dashboard } from './components/Dashboard'
-import { TermsGate, getAcceptance } from './components/TermsGate'
 
 function App() {
   useWebSocket()
-  // First-run acceptance gate: blocks controls until terms are accepted.
-  const [accepted, setAccepted] = useState(() => !!getAcceptance())
 
   return (
     <div className="flex flex-col w-screen h-screen bg-gray-950 text-white overflow-hidden">
       <StatusBar />
       <LicenseBanner />
-      <TraceBanner />
       {/* main fills remaining height, no scroll */}
       <main className="flex-1 min-h-0 overflow-hidden">
         <Dashboard />
       </main>
-      {!accepted && <TermsGate onAccept={() => setAccepted(true)} />}
     </div>
   )
 }

@@ -49,22 +49,6 @@ from app.components import (
     SETPOINT_REG_MAP,
     REG_BURNER_SP,
 )
-from app import plc_gate
-
-# VSD talkback comes from the serial converter (vsd_serial.vsd_state), populated
-# by the vsd_poll_loop task. Guard the import so the backend still starts if
-# pyserial is unavailable (e.g. a dev box without the converter).
-try:
-    from app.vsd_serial import (
-        vsd_state as VSD_STATE,
-        vsd_cmd as VSD_CMD,
-        cmd_clear_all_on,
-    )
-except Exception:  # noqa: BLE001
-    VSD_STATE = {}
-    VSD_CMD = {}
-    def cmd_clear_all_on():  # noqa: E704
-        pass
 
 logger = logging.getLogger(__name__)
 
@@ -86,16 +70,6 @@ async def poll_loop(client, manager, settings, license_mgr=None):
 
     while True:
         try:
-            # Released for MEB: do NOT touch the PLC (the umas client would
-            # auto-reconnect on any read and steal the link back). Serve a
-            # 'released' state so the HMI shows the banner + Reconnect button.
-            if plc_gate.is_released():
-                state = _released_state(settings, license_mgr)
-                _latest_state = state
-                await manager.broadcast(state)
-                await asyncio.sleep(interval)
-                continue
-
             proto = getattr(settings, "PLC_PROTO", "modbus").lower()
             if not settings.PLC_SIM and proto == "umas":
                 state = await _build_state_umas(client, settings, license_mgr)
@@ -106,41 +80,6 @@ async def poll_loop(client, manager, settings, license_mgr=None):
         except Exception as e:
             logger.error(f"Poll loop error: {e}")
         await asyncio.sleep(interval)
-
-
-def _released_state(settings, license_mgr=None) -> dict:
-    """State served while the PLC link is released for MEB — connected False,
-    released True, equipment indicators zeroed. The PLC keeps running its
-    program; this only reflects that the HMI has dropped its read/write link."""
-    state = {
-        "type":       "state",
-        "ts":         datetime.now(timezone.utc).isoformat(),
-        "connected":  False,
-        "released":   True,
-        "sim":        settings.PLC_SIM,
-        "safety_ok":  True,
-        "fan_proven": False,
-        "components": [
-            {
-                "id":        c.id,
-                "label":     c.label,
-                "kind":      c.kind,
-                "has_speed": c.has_speed,
-                "manual":    c.manual,
-                "cmd":       False,
-                "running":   False,
-                "fault":     False,
-                "speed_pct": 0.0,
-            }
-            for c in COMPONENTS
-        ],
-        "temps":     {"hotfan_motor": 0.0, "burner": 0.0, "product1": 0.0,
-                      "product2": 0.0, "exhaust": 0.0},
-        "setpoints": {"burner_hi_lo": 0.0, "burner_lo_off": 0.0, "product_max": 0.0},
-    }
-    if license_mgr is not None:
-        state["license"] = license_mgr.status().as_dict()
-    return state
 
 
 # ---------------------------------------------------------------------------
@@ -175,16 +114,6 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
     safety_ok  = True  # commissioning stand-in: no safety-status register in ladder yet; hardware relay is the real safety
     fan_proven = bool(running_word & (1 << BIT_FAN_PROVEN))
 
-    # Trace-chain contactor proof-of-run (--manual-modbus interlock):
-    #   %MW55 = 1 when the fan/lube contactor is proven (%I0.0 closed)
-    #   %MW58 = 1 when the interlock has TRIPPED (Trace running but contactor
-    #           not proven → the Trace VSD is stopped to protect the motor)
-    # SECOND read: the M221 caps a single UMAS multi-read at ~10 registers and the
-    # main burst above is already 10, so these must ride in their own request.
-    trace_regs = await client.read_many([55, 58]) if connected else None
-    trace_proven = bool(trace_regs.get(55, 0)) if trace_regs else False
-    trace_fault  = bool(trace_regs.get(58, 0)) if trace_regs else False
-
     components = []
     for comp in COMPONENTS:
         cmd     = bool(cmd_word     & (1 << comp.cmd_bit))
@@ -201,33 +130,6 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
             "fault":     fault,
             "speed_pct": (max(0.0, min(60.0, (regs.get(comp.speed_sp_reg, 0) if regs and comp.speed_sp_reg else 0) * 1.0)) if comp.has_speed else 0.0),
         })
-
-    # E-STOP: when safety drops, every commanded-high input goes LOW. (safety_ok is
-    # a placeholder=True until the M221 mirrors the safety-relay status %I0.13 to a
-    # readable %MW — once it does, this clears all RUN commands on E-stop.)
-    if not safety_ok:
-        cmd_clear_all_on()
-
-    # CONTROL PANEL — the vsd tiles show the OPERATOR'S COMMAND, not drive feedback:
-    #   cmd / speed come from the command store (immediate on tap / set);
-    #   only fault + online are kept from the drive (an exception must surface).
-    # Feedback running/Hz is deliberately NOT shown — this is a control panel, not a
-    # feedback panel (only the temps are feedback).
-    for cd in components:
-        if cd["kind"] == "vsd":
-            vs = VSD_STATE.get(cd["id"]) or {}
-            rec = VSD_CMD.get(cd["id"])
-            if rec is None:
-                # Not commanded yet this session — seed once from feedback so a
-                # backend restart doesn't show STOP while a drive is actually running.
-                rec = {"on": bool(vs.get("running")), "set_hz": float(vs.get("out_hz", 0.0))}
-                VSD_CMD[cd["id"]] = rec
-            cd["cmd"]        = bool(rec["on"])
-            cd["speed_pct"]  = float(rec["set_hz"])
-            cd["running"]    = bool(vs.get("running"))    # feedback, internal only
-            cd["fault"]      = bool(vs.get("fault"))
-            cd["fault_code"] = int(vs.get("code", 0))
-            cd["online"]     = bool(vs.get("online", False))
 
     temps = {
         "hotfan_motor": 0.0,                              # %MW30 sensor not wired
@@ -250,12 +152,9 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
         "type":       "state",
         "ts":         datetime.now(timezone.utc).isoformat(),
         "connected":  connected,
-        "released":   plc_gate.is_released(),
         "sim":        settings.PLC_SIM,
         "safety_ok":  safety_ok,
         "fan_proven": fan_proven,
-        "trace_proven": trace_proven,
-        "trace_fault":  trace_fault,
         "components": components,
         "temps":      temps,
         "setpoints":  setpoints,
@@ -350,7 +249,6 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
         "type":       "state",
         "ts":         datetime.now(timezone.utc).isoformat(),
         "connected":  client.is_connected,
-        "released":   plc_gate.is_released(),
         "sim":        settings.PLC_SIM,
         "safety_ok":  safety_ok,
         "fan_proven": fan_proven,

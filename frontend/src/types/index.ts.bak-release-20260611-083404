@@ -46,12 +46,9 @@ export interface DryerState {
   type: 'state'
   ts: string
   connected: boolean
-  released?: boolean   // true → HMI link dropped for MEB (PLC still running)
   sim: boolean
   safety_ok: boolean
   fan_proven: boolean
-  trace_proven?: boolean   // %MW55 — fan/lube contactor proven (%I0.0)
-  trace_fault?: boolean    // %MW58 — trace interlock tripped, Trace VSD stopped
   components: Component[]
   temps: Temps
   setpoints: Setpoints

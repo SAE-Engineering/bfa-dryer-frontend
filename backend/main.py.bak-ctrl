@@ -11,9 +11,7 @@ from pathlib import Path
 
 from app.components import COMPONENT_MAP, REG_CMD_WORD, REG_BURNER_SP, SETPOINT_REG_MAP
 from app.modbus_client import ModbusClient, SimulatedPlcClient
-from app.vsd_serial import (
-    VsdBus, AbbBus, vsd_poll_loop, VSD_NODE, ABB_NODE, cmd_set_on, cmd_set_hz,
-)
+from app.vsd_serial import VsdBus, AbbBus, vsd_poll_loop, VSD_NODE, ABB_NODE
 from app.umas_client import UmasMwClient
 from app.websocket_handler import setup_websocket, manager
 from app.poll_loop import poll_loop, get_latest_state
@@ -237,9 +235,6 @@ async def command(req: CommandRequest):
         bus, node = _bus_node(req.id)
         if bus is None or node is None:
             raise HTTPException(status_code=503, detail="VSD serial master unavailable")
-        # Control-panel: record the command FIRST so the tile flips immediately,
-        # independent of how long the drive takes to spin up / stop.
-        cmd_set_on(req.id, req.on)
         ok = await asyncio.to_thread(bus.run if req.on else bus.stop, node)
         if not ok:
             raise HTTPException(status_code=502, detail="VSD drive write failed")
@@ -268,9 +263,6 @@ async def set_speed(req: SpeedRequest):
         if bus is None or node is None:
             raise HTTPException(status_code=503, detail="VSD serial master unavailable")
         hz = max(0.0, min(50.0, float(req.value_pct)))
-        # Control-panel: record the setpoint so the tile shows the SET speed,
-        # not the drive's feedback Hz.
-        cmd_set_hz(req.id, hz)
         ok = await asyncio.to_thread(bus.set_freq, node, hz)
         if not ok:
             raise HTTPException(status_code=502, detail="VSD drive write failed")
