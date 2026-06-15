@@ -110,3 +110,11 @@ export interface DiagState {
   mw: Record<string, number | null>
   m: Record<string, boolean | null>
 }
+
+// Response from POST /api/diag-auth — the diagnostics PIN gate.
+// ok=false on a wrong PIN (no token). token is the in-memory unlock for
+// subsequent GET /api/diag calls this tab/session.
+export interface DiagAuthResponse {
+  ok: boolean
+  token?: string
+}

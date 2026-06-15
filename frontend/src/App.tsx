@@ -5,6 +5,7 @@ import { FaultBanner } from "./components/FaultBanner"
 import { LicenseBanner } from "./components/LicenseBanner"
 import { Dashboard } from "./components/Dashboard"
 import { DiagScreen } from "./components/DiagScreen"
+import { DiagPinGate } from "./components/DiagPinGate"
 
 // Hidden diagnostics route: the panel kiosk has no URL bar, so the diag screen
 // is reached via the URL hash (#diag) — NOT linked anywhere in the normal UI.
@@ -24,7 +25,20 @@ function App() {
   useWebSocket()
   const route = useHashRoute()
 
+  // In-memory diagnostics unlock for this tab/session. The hidden trigger
+  // (long-press logo / #diag) only opens the diag screen once the tech has
+  // entered the PIN (checked server-side). Reload/close clears it.
+  const [diagUnlocked, setDiagUnlocked] = useState(false)
+
   if (route === "diag") {
+    if (!diagUnlocked) {
+      return (
+        <DiagPinGate
+          onUnlock={() => setDiagUnlocked(true)}
+          onCancel={() => { window.location.hash = "" }}
+        />
+      )
+    }
     return <DiagScreen onClose={() => { window.location.hash = "" }} />
   }
 

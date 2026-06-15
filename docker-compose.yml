@@ -20,6 +20,8 @@ services:
       - LICENSE_ENFORCE=${LICENSE_ENFORCE:-true}
       - LICENSE_REQUIRE_MACHINE=${LICENSE_REQUIRE_MACHINE:-true}
       - MACHINE_ID=${MACHINE_ID:-}
+      # Diagnostics-screen PIN gate (CHANGE in panel .env)
+      - DIAG_PIN=${DIAG_PIN:-0000}
     volumes:
       - ./backend:/app
       - ./data:/data

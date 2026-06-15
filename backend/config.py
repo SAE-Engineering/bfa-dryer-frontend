@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     # upload. On-panel maintenance gate, NOT a login credential.
     PLC_RELEASE_PIN: str = "8800"
 
+    # Diagnostics-screen PIN gate. The hidden read-only PLC diagnostics screen
+    # (long-press logo / #diag) is gated behind this PIN so normal operators
+    # cannot open it; techs with the PIN can. Checked server-side (POST
+    # /api/diag-auth) so the real PIN is NEVER in the JS bundle.
+    #   CHANGE in the panel .env (DIAG_PIN=...).  Default 0000 is a placeholder.
+    DIAG_PIN: str = "0000"
+
     # Server / dev settings
     DEBUG: bool = False
     HOST: str = "0.0.0.0"

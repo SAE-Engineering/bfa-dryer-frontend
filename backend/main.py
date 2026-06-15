@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 import asyncio
 import logging
 import socket
+import secrets
+import time
 from pathlib import Path
 
 from app.components import (
@@ -294,6 +296,54 @@ async def plc_released_status():
 
 
 # ---------------------------------------------------------------------------
+# Diagnostics PIN gate.
+# The hidden read-only diag screen is gated behind a server-checked PIN
+# (env DIAG_PIN) so the real PIN is never in the JS bundle. On a correct PIN
+# POST /api/diag-auth issues a short-lived opaque token; GET /api/diag then
+# requires that token (X-Diag-Token header or ?t= query). Tokens are held in
+# process memory only and expire after DIAG_TOKEN_TTL_S.
+# ---------------------------------------------------------------------------
+
+DIAG_TOKEN_TTL_S = 12 * 60 * 60   # tech keeps access for the rest of the shift
+_diag_tokens: dict[str, float] = {}   # token -> expiry epoch seconds
+
+
+def _issue_diag_token() -> str:
+    now = time.time()
+    # opportunistic prune of expired tokens
+    for t, exp in list(_diag_tokens.items()):
+        if exp < now:
+            _diag_tokens.pop(t, None)
+    tok = secrets.token_urlsafe(24)
+    _diag_tokens[tok] = now + DIAG_TOKEN_TTL_S
+    return tok
+
+
+def _diag_token_valid(tok: str | None) -> bool:
+    if not tok:
+        return False
+    exp = _diag_tokens.get(tok)
+    if exp is None:
+        return False
+    if exp < time.time():
+        _diag_tokens.pop(tok, None)
+        return False
+    return True
+
+
+@app.post("/api/diag-auth")
+async def diag_auth(req: PinRequest):
+    """Check the diagnostics PIN (server-side, against env DIAG_PIN).
+
+    Returns {ok, token} on success so the real PIN never ships in the JS
+    bundle. Wrong PIN returns {ok: false} (200, no token) so the keypad can
+    show \"Incorrect PIN\" without leaking timing/status detail."""
+    if secrets.compare_digest(str(req.pin), str(settings.DIAG_PIN)):
+        return {"ok": True, "token": _issue_diag_token()}
+    return {"ok": False}
+
+
+# ---------------------------------------------------------------------------
 # Hidden diagnostics — GET /api/diag
 # Read-only raw register / bit dump for on-panel fault-finding (no MEB needed).
 # NEVER writes to the PLC.  Reads a fixed set of %MW words + %M bits each call
@@ -309,12 +359,20 @@ DIAG_M_ADDRS = [0, 1, 2, 3, 4, 5, 20, 21, 22, 23, 80, 81, 82, 83, 88, 89, 90, 91
 
 
 @app.get("/api/diag")
-async def diag():
+async def diag(request: Request):
     """Raw %MW / %M dump for the hidden on-panel diagnostics screen.
+
+    PIN-gated: requires a valid token (X-Diag-Token header or ?t= query)
+    issued by POST /api/diag-auth.  Without one this returns 403 so the raw
+    register dump is not reachable by a normal operator.
 
     Read-only.  Returns {ts, conn, mw, m}; on any read error the affected
     values are null and a note is added to conn.errors (never raises 500).
     """
+    tok = request.headers.get("X-Diag-Token") or request.query_params.get("t")
+    if not _diag_token_valid(tok):
+        raise HTTPException(status_code=403, detail="Diagnostics locked")
+
     from datetime import datetime, timezone
 
     errors: list[str] = []
