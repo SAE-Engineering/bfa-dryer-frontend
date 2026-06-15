@@ -166,9 +166,11 @@ class UmasMwClient:
         """
         if not addrs:
             return {}
-        payload = bytes([len(addrs)])
-        for a in addrs:
-            payload += bytes([2, 3, a & 0xFF, (a >> 8) & 0xFF, 1, 0])
+        # The M221 caps a single 0x24 multi-read at 10 variables (verified live
+        # 2026-06-15: requesting >10 returns exactly 10 -> the "short response"
+        # bug). Chunk to stay under it; 8 leaves margin. Each chunk = one
+        # round-trip, all under the same lock/connection.
+        MAX_VARS = 8
 
         async with self._lock:
             if self._sock is None:
@@ -176,18 +178,24 @@ class UmasMwClient:
                     return None
             try:
                 sock = self._sock
-                body = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: self._sync_exchange(sock, 0x24, payload)
-                )
-                # body[0]=0x5A, [1]=pairing=0x00, [2]=0xFE(ok), [3]=count
-                if len(body) < 4 + len(addrs) * 4:
-                    raise ValueError(f"UMAS read_many short response ({len(body)} bytes)")
-                if body[2] != 0xFE:
-                    raise ValueError(f"UMAS read_many status {body[2]:#04x} (expected 0xFE)")
-                result = {}
-                for i, a in enumerate(addrs):
-                    g = body[4 + 4 * i: 8 + 4 * i]
-                    result[a] = g[2] | (g[3] << 8)
+                result: dict[int, int] = {}
+                for off in range(0, len(addrs), MAX_VARS):
+                    chunk = addrs[off:off + MAX_VARS]
+                    payload = bytes([len(chunk)])
+                    for a in chunk:
+                        payload += bytes([2, 3, a & 0xFF, (a >> 8) & 0xFF, 1, 0])
+                    body = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda p=payload: self._sync_exchange(sock, 0x24, p)
+                    )
+                    # body[0]=0x5A, [1]=pairing=0x00, [2]=0xFE(ok), [3]=count
+                    if len(body) < 4 + len(chunk) * 4:
+                        raise ValueError(
+                            f"UMAS read_many short response ({len(body)} bytes) for chunk {chunk}")
+                    if body[2] != 0xFE:
+                        raise ValueError(f"UMAS read_many status {body[2]:#04x} (expected 0xFE)")
+                    for i, a in enumerate(chunk):
+                        g = body[4 + 4 * i: 8 + 4 * i]
+                        result[a] = g[2] | (g[3] << 8)
                 self.is_connected = True
                 return result
             except Exception as e:
