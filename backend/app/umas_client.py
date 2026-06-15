@@ -245,9 +245,11 @@ class UmasMwClient:
         """
         if not addrs:
             return {}
-        payload = bytes([len(addrs)])
-        for a in addrs:
-            payload += bytes([2, self.M_OBJECT_CLASS, a & 0xFF, (a >> 8) & 0xFF, 1, 0])
+        # Same M221 0x24 cap as read_many: max 10 variables per request, else it
+        # silently returns only 10 (count mismatch). Chunk to 8 so larger %M
+        # reads (e.g. the diag screen's 18 bits) don't truncate. One round-trip
+        # per chunk, same lock/connection.
+        MAX_VARS = 8
 
         async with self._lock:
             if self._sock is None:
@@ -255,28 +257,33 @@ class UmasMwClient:
                     return None
             try:
                 sock = self._sock
-                body = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: self._sync_exchange(sock, 0x24, payload)
-                )
-                # body[0]=0x5A, [1]=pairing, [2]=status, [3]=count
-                if len(body) < 4:
-                    raise ValueError(f"UMAS read_bits short response ({len(body)} bytes)")
-                if body[2] != 0xFE:
-                    raise ValueError(f"UMAS read_bits status {body[2]:#04x} (expected 0xFE)")
-                count = body[3]
-                if count != len(addrs):
-                    raise ValueError(
-                        f"UMAS read_bits count mismatch (resp {count} != req {len(addrs)})")
-                # Each %M item is 3 bytes: [0x00, 0x00, bit]
                 result: dict[int, bool] = {}
-                p = 4
-                for a in addrs:
-                    group = body[p:p + 3]
-                    if len(group) < 3:
+                for off in range(0, len(addrs), MAX_VARS):
+                    chunk = addrs[off:off + MAX_VARS]
+                    payload = bytes([len(chunk)])
+                    for a in chunk:
+                        payload += bytes([2, self.M_OBJECT_CLASS, a & 0xFF, (a >> 8) & 0xFF, 1, 0])
+                    body = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda p=payload: self._sync_exchange(sock, 0x24, p)
+                    )
+                    # body[0]=0x5A, [1]=pairing, [2]=status, [3]=count
+                    if len(body) < 4:
+                        raise ValueError(f"UMAS read_bits short response ({len(body)} bytes)")
+                    if body[2] != 0xFE:
+                        raise ValueError(f"UMAS read_bits status {body[2]:#04x} (expected 0xFE)")
+                    count = body[3]
+                    if count != len(chunk):
                         raise ValueError(
-                            f"UMAS read_bits truncated item for %M{a} at offset {p}")
-                    result[a] = bool(group[2] & 1)
-                    p += 3
+                            f"UMAS read_bits count mismatch (resp {count} != req {len(chunk)})")
+                    # Each %M item is 3 bytes: [0x00, 0x00, bit]
+                    p = 4
+                    for a in chunk:
+                        group = body[p:p + 3]
+                        if len(group) < 3:
+                            raise ValueError(
+                                f"UMAS read_bits truncated item for %M{a} at offset {p}")
+                        result[a] = bool(group[2] & 1)
+                        p += 3
                 self.is_connected = True
                 return result
             except Exception as e:
