@@ -8,7 +8,13 @@ import logging
 import socket
 from pathlib import Path
 
-from app.components import COMPONENT_MAP, REG_CMD_WORD, REG_BURNER_SP, SETPOINT_REG_MAP
+from app.components import (
+    COMPONENT_MAP,
+    REG_CMD_WORD,
+    REG_BURNER_SP,
+    SETPOINT_REG_MAP,
+    speed_pct_to_raw,
+)
 from app.modbus_client import ModbusClient, SimulatedPlcClient
 from app.umas_client import UmasMwClient
 from app.websocket_handler import setup_websocket, manager
@@ -196,13 +202,16 @@ async def set_speed(req: SpeedRequest):
 
     _assert_unlocked()
 
-    # Scale 0-100 % → 0-10000; clamp
-    raw = int(max(0, min(10000, round(req.value_pct * 100))))
+    # Scale the operator 0-100 % to the register's unit.  The FINAL PLC reads the
+    # drive speed words %MW40-43 as Hz (0-50), so a 'hz' setpoint maps 0-100 % →
+    # 0-50 Hz; the hot-fan %MW44 ('pct', display-only) stays 0-100.
+    raw = speed_pct_to_raw(req.value_pct, comp.speed_unit)
     ok = await plc_client.write_register(comp.speed_sp_reg, raw)
     if not ok:
         raise HTTPException(status_code=502, detail="PLC write failed")
 
-    return {"ok": True, "id": req.id, "value_pct": req.value_pct, "raw": raw}
+    return {"ok": True, "id": req.id, "value_pct": req.value_pct,
+            "raw": raw, "unit": comp.speed_unit}
 
 
 @app.post("/api/burner_setpoint")
