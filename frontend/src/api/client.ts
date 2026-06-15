@@ -12,22 +12,35 @@ import {
   DiagAuthResponse,
 } from '../types'
 
+// Deployment base path.  Vite injects BASE_URL from the build `base` option:
+//   - real panel / dev  → "/"          → apiUrl('/api/x') === '/api/x'  (unchanged)
+//   - bosun sim build    → "/bfa/sim/"  → apiUrl('/api/x') === '/bfa/sim/api/x'
+// This lets the same SPA be served under a sub-path (behind the designpacks
+// nginx) without hard-coding the prefix.  Trailing slash trimmed so we don't
+// double up on the leading slash of the path argument.
+const BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+export function apiUrl(path: string): string {
+  return BASE + path
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
+  const url = apiUrl(path)
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   if (!res.ok) {
-    throw new Error(`POST ${path} failed: ${res.status} ${res.statusText}`)
+    throw new Error(`POST ${url} failed: ${res.status} ${res.statusText}`)
   }
   return res.json() as Promise<T>
 }
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path)
+  const url = apiUrl(path)
+  const res = await fetch(url)
   if (!res.ok) {
-    throw new Error(`GET ${path} failed: ${res.status} ${res.statusText}`)
+    throw new Error(`GET ${url} failed: ${res.status} ${res.statusText}`)
   }
   return res.json() as Promise<T>
 }
@@ -59,11 +72,12 @@ export const api = {
   // Hidden diagnostics — raw %MW / %M register dump (read-only).
   // PIN-gated: requires the unlock token issued by diagAuth (sent as a header).
   getDiag: async (): Promise<DiagState> => {
-    const res = await fetch('/api/diag', {
+    const url = apiUrl('/api/diag')
+    const res = await fetch(url, {
       headers: diagToken ? { 'X-Diag-Token': diagToken } : {},
     })
     if (!res.ok) {
-      throw new Error(`GET /api/diag failed: ${res.status} ${res.statusText}`)
+      throw new Error(`GET ${url} failed: ${res.status} ${res.statusText}`)
     }
     return res.json() as Promise<DiagState>
   },

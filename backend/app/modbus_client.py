@@ -237,6 +237,72 @@ class SimulatedPlcClient:
             self._tick()
             return list(self._regs[address: address + count])
 
+    # ------------------------------------------------------------------
+    # Diagnostics-screen reads (SIM ONLY) — mirror the UMAS client's
+    # read_many / read_bits so the hidden diag screen (and the bosun-hosted
+    # sim's logic view) shows live %MW / %M data instead of "client has no
+    # read_many".  The live panel uses UmasMwClient's real implementations;
+    # these are the simulator's equivalents against the in-process bank.
+    # NEVER touched on hardware (PLC_SIM=false uses UmasMwClient).
+    # ------------------------------------------------------------------
+
+    async def read_many(self, addrs: list[int]) -> dict[int, int] | None:
+        """SIM: read multiple %MW addresses. Returns {addr: value}."""
+        if not addrs:
+            return {}
+        async with self._lock:
+            self._tick()
+            out: dict[int, int] = {}
+            for a in addrs:
+                out[a] = self._regs[a] if 0 <= a < self._SIZE else 0
+            return out
+
+    async def read_bits(self, addrs: list[int]) -> dict[int, bool] | None:
+        """SIM: synthesise %M bits from the in-process register bank so the
+        diag/logic view lights up as the operator drives the sim HMI.
+
+        Mapping (sim only — derived, NOT a hardware contract):
+          %M0  RUN-PERMIT  = True   (machine permitted in sim)
+          %M1  MAIN on     = True
+          %M2  SHUTOFF     = True   (closed/run)
+          %M3  SOFT-LOCKOUT= False
+          %M4  SAFETY-OK   = True   (sim safety always engaged; %MW20:X14)
+          %M5  RESET       = False
+          %M20 FIRE        = False  (sim simulates no faults)
+          %M21 OVER-TEMP   = False
+          %M22 SCORCH      = False
+          %M23 Hot-fan ON  = %MW20:X13 (fan-proven mirror)
+          %M80-83 MC_Power = running of the 4 VSDs in devId order
+                             (0 Trace chain bit10, 1 Agitator1 bit3,
+                              2 Agitator2 bit9, 3 Spinner bit2) from %MW20
+          %M88-91 ReadStatus valid = True (sim always returns data)
+        """
+        if not addrs:
+            return {}
+        async with self._lock:
+            self._tick()
+            run = self._regs[20]            # running word (mirrors %MW0 after ~1 s)
+            fan_proven = bool(run & (1 << 13))
+            # VSD running bits by devId (cmd_bit positions, mirrored in %MW20).
+            vsd_cmd_bits = [10, 3, 9, 2]    # trace_chain, ag1, ag2, spinner
+            static = {
+                0: True,    1: True,   2: True,   3: False,
+                4: True,    5: False,
+                20: False,  21: False, 22: False,
+                23: fan_proven,
+            }
+            out: dict[int, bool] = {}
+            for a in addrs:
+                if a in static:
+                    out[a] = static[a]
+                elif 80 <= a <= 83:
+                    out[a] = bool(run & (1 << vsd_cmd_bits[a - 80]))
+                elif 88 <= a <= 91:
+                    out[a] = True
+                else:
+                    out[a] = False
+            return out
+
     async def write_register(self, address: int, value: int) -> bool:
         async with self._lock:
             self._regs[address] = value & 0xFFFF

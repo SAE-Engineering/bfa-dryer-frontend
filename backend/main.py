@@ -366,12 +366,17 @@ async def diag(request: Request):
     issued by POST /api/diag-auth.  Without one this returns 403 so the raw
     register dump is not reachable by a normal operator.
 
-    Read-only.  Returns {ts, conn, mw, m}; on any read error the affected
-    values are null and a note is added to conn.errors (never raises 500).
+    SIM-ONLY BYPASS: when settings.PLC_SIM is true (an in-process fake PLC,
+    no real hardware) the PIN gate is skipped so the bosun-hosted sim's logic
+    view can poll the register/bit dump without a token.  This is guarded
+    STRICTLY on the sim flag — on a real panel (PLC_SIM=false) the token check
+    below is unchanged and the diag dump stays PIN-gated.  The sim exposes no
+    write path that the bypass could reach, and there is no live PLC behind it.
     """
-    tok = request.headers.get("X-Diag-Token") or request.query_params.get("t")
-    if not _diag_token_valid(tok):
-        raise HTTPException(status_code=403, detail="Diagnostics locked")
+    if not settings.PLC_SIM:
+        tok = request.headers.get("X-Diag-Token") or request.query_params.get("t")
+        if not _diag_token_valid(tok):
+            raise HTTPException(status_code=403, detail="Diagnostics locked")
 
     from datetime import datetime, timezone
 

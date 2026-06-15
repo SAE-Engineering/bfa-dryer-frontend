@@ -9,7 +9,11 @@ import { useControlStore } from '../store/controlStore'
 import { api } from '../api/client'
 import { DryerState } from '../types'
 
-const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
+// Base-aware WS URL.  BASE_URL is "/" on the real panel/dev (→ ".../ws", as
+// before) and "/bfa/sim/" on the bosun sim build (→ ".../bfa/sim/ws"), so the
+// same SPA works when served under a sub-path behind the designpacks nginx.
+const WS_BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}${WS_BASE}/ws`
 
 export const useWebSocket = () => {
   const setDryerState = useControlStore((s) => s.setDryerState)
