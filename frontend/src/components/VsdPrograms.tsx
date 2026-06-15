@@ -1,179 +1,161 @@
-// VSD commissioning program — BFD banana dryer, Teco E510 drives.
-// Per-drive parameter table with KEYPAD vs MODBUS tagging.
-// Source: TECO-E510N1-AC002 Communication Addendum + E510 manual V08.
+// VSD commissioning reference — BFD banana dryer, FINAL all-ATV architecture.
 //
-// CRITICAL: E510 Modbus func-06 writes to params whose stored value > 255
-// silently truncate to the low byte — the drive echoes the full value once
-// then reverts. func-16 (write-multiple) also reverts AND trips CE fault (code 28).
-// Params whose value ≤ 255 commit reliably. Column "Via" reflects this rule.
+// The final PLC program (BFD_final.smbp) drives all four loads from the M221's
+// built-in Modbus Serial IOScanner (SL1) at 19200 8E1, slaves 1-4:
+//   slave 1 = %DRV0 = Trace chain  (ATV12)
+//   slave 2 = %DRV1 = Agitator 1   (ATV12)
+//   slave 3 = %DRV2 = Agitator 2   (ATV12)
+//   slave 4 = %DRV3 = Spinner      (ATV320 3 kW — no ATV12 above 3 kW)
+// Run/stop + speed reference come over Modbus from the PLC IOScanner (CMD/LFRD
+// registers); the HMI command bits %MW0:Xk and Hz setpoints %MW40-43 feed the
+// drive function blocks (MC_Power / MC_MoveVel) in the ladder.
+//
+// READ-ONLY REFERENCE. The HMI never writes drive parameters — these values are
+// keyed on the drive itself (ATV keypad / SoMove) during commissioning. This
+// screen is the checklist + the per-drive target settings.
 
 import { useState } from 'react'
 
-type Via = 'KEYPAD' | 'Modbus'
+type Via = 'KEYPAD' | 'IOScanner'
 
 interface Param {
-  param: string      // e.g. "02-04"
-  reg: string        // Modbus register hex
+  param: string       // ATV menu code, e.g. "FUn-CtL-Add"
+  code: string        // short keypad mnemonic
   description: string
-  value: string      // display value with unit
-  raw: string        // integer written to register
+  value: string       // display value with unit
   via: Via
   note?: string
 }
 
 interface Drive {
-  node: number
+  slave: number       // Modbus slave address on SL1 (1-4)
+  drv: string         // PLC drive axis %DRVn
   name: string
+  family: 'ATV12' | 'ATV320'
+  cmdBit: string      // %MW0:Xk command bit
+  hzReg: string       // %MWnn Hz setpoint the HMI writes
+  permit: string      // %Mnn PLC run permit
   params: Param[]
 }
 
-// ─── Shared comm + control params (same for all 4 drives except node address) ────
-// Group 09: 09-01=RTU, 09-02=9600bd, 09-03=1-stop-bit, 09-04=no-parity, 09-05=8-bit
-// Must be entered via KEYPAD before Modbus is active on that drive.
-// Group 00: 00-02=Comm run source, 00-05=Comm freq source — both ≤255 → Modbus.
-
-// ─── SPINNER  node 5  (was node 1 — addr 1 is invisible on Teco, readdressed) ────
-// Nameplate: 420 V / 50 Hz / 964 rpm / 3.0 kW / 7.02 A / cosφ 0.74 / 6-pole / Y
-const SPINNER: Drive = {
-  node: 5, name: 'Spinner',
-  params: [
-    // Group 09 — comm setup (keypad required, drive can't hear Modbus until these are set)
-    { param: '09-00', reg: '0x0900', description: 'Modbus node address',         value: '5',         raw: '5',    via: 'KEYPAD', note: 'Set first — addr 1 is invisible on Teco drives' },
-    { param: '09-01', reg: '0x0901', description: 'Protocol (0=RTU)',             value: 'RTU',       raw: '0',    via: 'KEYPAD', note: 'Set before connecting Modbus master' },
-    { param: '09-02', reg: '0x0902', description: 'Baud rate (1=9600)',           value: '9600 bps',  raw: '1',    via: 'KEYPAD', note: 'Set before connecting' },
-    { param: '09-03', reg: '0x0903', description: 'Stop bits (0=1 stop bit)',     value: '1 stop bit',raw: '0',    via: 'KEYPAD', note: 'Set before connecting' },
-    { param: '09-04', reg: '0x0904', description: 'Parity (0=none)',              value: 'None',      raw: '0',    via: 'KEYPAD', note: 'Set before connecting' },
-    { param: '09-05', reg: '0x0905', description: 'Data bits (0=8 bit)',          value: '8 bit',     raw: '0',    via: 'KEYPAD', note: 'RTU requires 8-bit' },
-    { param: '09-07', reg: '0x0907', description: 'Comm timeout action (3=keep running)', value: 'Keep running + COT', raw: '3', via: 'Modbus', note: 'After addr/baud set; prevents stop on master dropout' },
-    // Group 02 — motor nameplate
-    { param: '02-01', reg: '0x0201', description: 'Rated current (0.1 A units)', value: '7.0 A',     raw: '70',   via: 'Modbus', note: '7.02 A → 70 (rounds to 0.1A)' },
-    { param: '02-03', reg: '0x0203', description: 'Rated speed (rpm)',            value: '964 rpm',   raw: '964',  via: 'KEYPAD', note: '964 > 255 — use E510 Link or keypad' },
-    { param: '02-04', reg: '0x0204', description: 'Rated voltage (0.1 V units)', value: '420.0 V',   raw: '4200', via: 'KEYPAD', note: '4200 > 255 — use E510 Link or keypad' },
-    { param: '02-05', reg: '0x0205', description: 'Rated power (0.1 kW units)',  value: '3.0 kW',    raw: '30',   via: 'Modbus' },
-    { param: '02-06', reg: '0x0206', description: 'Rated freq (0.1 Hz units)',   value: '50.0 Hz',   raw: '500',  via: 'KEYPAD', note: '500 > 255 — use E510 Link or keypad' },
-    { param: '02-07', reg: '0x0207', description: 'Poles',                       value: '6',         raw: '6',    via: 'Modbus' },
-    // Group 00 — run/freq source + limits
-    { param: '00-02', reg: '0x0002', description: 'Run command source (2=Comm)', value: 'Communication', raw: '2', via: 'Modbus', note: 'Drive obeys 0x2501 run/stop bit' },
-    { param: '00-05', reg: '0x0005', description: 'Freq cmd source (5=Comm)',    value: 'Comm (reg 0x2502)', raw: '5', via: 'Modbus' },
-    { param: '00-12', reg: '0x000C', description: 'Freq upper limit (0.1 Hz)',   value: '50.0 Hz',   raw: '500',  via: 'KEYPAD', note: '500 > 255 — keypad or E510 Link' },
-    { param: '00-13', reg: '0x000D', description: 'Freq lower limit (0.1 Hz)',   value: '0.0 Hz',    raw: '0',    via: 'Modbus' },
-    { param: '00-14', reg: '0x000E', description: 'Accel time 1 (0.1 s units)', value: '10.0 s',    raw: '100',  via: 'Modbus', note: 'Adjust on-site if motor trips OC-A' },
-    { param: '00-15', reg: '0x000F', description: 'Decel time 1 (0.1 s units)', value: '10.0 s',    raw: '100',  via: 'Modbus', note: 'Extend if DC-bus OV on decel' },
-  ],
-}
-
-// ─── AGITATOR 1  node 2 ──────────────────────────────────────────────────────────
-// Nameplate: 400 V / 50 Hz / 1410 rpm / 2.2 kW / 5.0 A / cosφ 0.78 / 4-pole / Y
-const AGITATOR1: Drive = {
-  node: 2, name: 'Agitator 1',
-  params: [
-    { param: '09-00', reg: '0x0900', description: 'Modbus node address',         value: '2',         raw: '2',    via: 'KEYPAD' },
-    { param: '09-01', reg: '0x0901', description: 'Protocol (0=RTU)',             value: 'RTU',       raw: '0',    via: 'KEYPAD' },
-    { param: '09-02', reg: '0x0902', description: 'Baud rate (1=9600)',           value: '9600 bps',  raw: '1',    via: 'KEYPAD' },
-    { param: '09-03', reg: '0x0903', description: 'Stop bits (0=1)',              value: '1 stop bit',raw: '0',    via: 'KEYPAD' },
-    { param: '09-04', reg: '0x0904', description: 'Parity (0=none)',              value: 'None',      raw: '0',    via: 'KEYPAD' },
-    { param: '09-05', reg: '0x0905', description: 'Data bits (0=8 bit)',          value: '8 bit',     raw: '0',    via: 'KEYPAD' },
-    { param: '09-07', reg: '0x0907', description: 'Comm timeout action',         value: 'Keep running + COT', raw: '3', via: 'Modbus' },
-    { param: '02-01', reg: '0x0201', description: 'Rated current (0.1 A)',       value: '5.0 A',     raw: '50',   via: 'Modbus' },
-    { param: '02-03', reg: '0x0203', description: 'Rated speed (rpm)',            value: '1410 rpm',  raw: '1410', via: 'KEYPAD', note: '1410 > 255' },
-    { param: '02-04', reg: '0x0204', description: 'Rated voltage (0.1 V)',       value: '400.0 V',   raw: '4000', via: 'KEYPAD', note: '4000 > 255' },
-    { param: '02-05', reg: '0x0205', description: 'Rated power (0.1 kW)',        value: '2.2 kW',    raw: '22',   via: 'Modbus' },
-    { param: '02-06', reg: '0x0206', description: 'Rated freq (0.1 Hz)',         value: '50.0 Hz',   raw: '500',  via: 'KEYPAD', note: '500 > 255' },
-    { param: '02-07', reg: '0x0207', description: 'Poles',                       value: '4',         raw: '4',    via: 'Modbus' },
-    { param: '00-02', reg: '0x0002', description: 'Run command source (2=Comm)', value: 'Communication', raw: '2', via: 'Modbus' },
-    { param: '00-05', reg: '0x0005', description: 'Freq cmd source (5=Comm)',    value: 'Comm (reg 0x2502)', raw: '5', via: 'Modbus' },
-    { param: '00-12', reg: '0x000C', description: 'Freq upper limit (0.1 Hz)',   value: '50.0 Hz',   raw: '500',  via: 'KEYPAD', note: '500 > 255' },
-    { param: '00-13', reg: '0x000D', description: 'Freq lower limit (0.1 Hz)',   value: '0.0 Hz',    raw: '0',    via: 'Modbus' },
-    { param: '00-14', reg: '0x000E', description: 'Accel time 1 (0.1 s)',        value: '10.0 s',    raw: '100',  via: 'Modbus' },
-    { param: '00-15', reg: '0x000F', description: 'Decel time 1 (0.1 s)',        value: '10.0 s',    raw: '100',  via: 'Modbus' },
-  ],
-}
-
-// ─── AGITATOR 2  node 3 ──────────────────────────────────────────────────────────
-// Nameplate: 420 V / 50 Hz / 1445 rpm / 1.5 kW / 3.3 A / cosφ 0.77 / 4-pole / Y
-const AGITATOR2: Drive = {
-  node: 3, name: 'Agitator 2',
-  params: [
-    { param: '09-00', reg: '0x0900', description: 'Modbus node address',         value: '3',         raw: '3',    via: 'KEYPAD' },
-    { param: '09-01', reg: '0x0901', description: 'Protocol (0=RTU)',             value: 'RTU',       raw: '0',    via: 'KEYPAD' },
-    { param: '09-02', reg: '0x0902', description: 'Baud rate (1=9600)',           value: '9600 bps',  raw: '1',    via: 'KEYPAD' },
-    { param: '09-03', reg: '0x0903', description: 'Stop bits (0=1)',              value: '1 stop bit',raw: '0',    via: 'KEYPAD' },
-    { param: '09-04', reg: '0x0904', description: 'Parity (0=none)',              value: 'None',      raw: '0',    via: 'KEYPAD' },
-    { param: '09-05', reg: '0x0905', description: 'Data bits (0=8 bit)',          value: '8 bit',     raw: '0',    via: 'KEYPAD' },
-    { param: '09-07', reg: '0x0907', description: 'Comm timeout action',         value: 'Keep running + COT', raw: '3', via: 'Modbus' },
-    { param: '02-01', reg: '0x0201', description: 'Rated current (0.1 A)',       value: '3.3 A',     raw: '33',   via: 'Modbus' },
-    { param: '02-03', reg: '0x0203', description: 'Rated speed (rpm)',            value: '1445 rpm',  raw: '1445', via: 'KEYPAD', note: '1445 > 255' },
-    { param: '02-04', reg: '0x0204', description: 'Rated voltage (0.1 V)',       value: '420.0 V',   raw: '4200', via: 'KEYPAD', note: '4200 > 255' },
-    { param: '02-05', reg: '0x0205', description: 'Rated power (0.1 kW)',        value: '1.5 kW',    raw: '15',   via: 'Modbus' },
-    { param: '02-06', reg: '0x0206', description: 'Rated freq (0.1 Hz)',         value: '50.0 Hz',   raw: '500',  via: 'KEYPAD', note: '500 > 255' },
-    { param: '02-07', reg: '0x0207', description: 'Poles',                       value: '4',         raw: '4',    via: 'Modbus' },
-    { param: '00-02', reg: '0x0002', description: 'Run command source (2=Comm)', value: 'Communication', raw: '2', via: 'Modbus' },
-    { param: '00-05', reg: '0x0005', description: 'Freq cmd source (5=Comm)',    value: 'Comm (reg 0x2502)', raw: '5', via: 'Modbus' },
-    { param: '00-12', reg: '0x000C', description: 'Freq upper limit (0.1 Hz)',   value: '50.0 Hz',   raw: '500',  via: 'KEYPAD', note: '500 > 255' },
-    { param: '00-13', reg: '0x000D', description: 'Freq lower limit (0.1 Hz)',   value: '0.0 Hz',    raw: '0',    via: 'Modbus' },
-    { param: '00-14', reg: '0x000E', description: 'Accel time 1 (0.1 s)',        value: '10.0 s',    raw: '100',  via: 'Modbus' },
-    { param: '00-15', reg: '0x000F', description: 'Decel time 1 (0.1 s)',        value: '10.0 s',    raw: '100',  via: 'Modbus' },
-  ],
-}
-
-// ─── TRACE CHAIN  node 4 ─────────────────────────────────────────────────────────
-// Nameplate: 230 V / 50 Hz / 850 rpm / 0.09 kW / 0.85 A / cosφ 0.67 / delta
-// ⚠ VOLTAGE FLAG: 230 V delta motor. 400V-class E510 range for 02-04 is 323~528 V.
-//   If the drive is a 400V-class unit, entering 230 V (raw 2300) is OUT OF RANGE.
-//   Options: (a) confirm drive is a 230V-class unit — enter 230.0 V → raw 2300,
-//            (b) if 400V-class and motor rewired star: enter 400.0 V → raw 4000.
-//   DO NOT guess — confirm on-site before commissioning.
-// ⚠ POWER: 0.09 kW is below 02-05 minimum of 0.1 kW. Write raw 1 (= 0.1 kW min).
-const TRACE_CHAIN: Drive = {
-  node: 4, name: 'Trace Chain',
-  params: [
-    { param: '09-00', reg: '0x0900', description: 'Modbus node address',         value: '4',         raw: '4',    via: 'KEYPAD' },
-    { param: '09-01', reg: '0x0901', description: 'Protocol (0=RTU)',             value: 'RTU',       raw: '0',    via: 'KEYPAD' },
-    { param: '09-02', reg: '0x0902', description: 'Baud rate (1=9600)',           value: '9600 bps',  raw: '1',    via: 'KEYPAD' },
-    { param: '09-03', reg: '0x0903', description: 'Stop bits (0=1)',              value: '1 stop bit',raw: '0',    via: 'KEYPAD' },
-    { param: '09-04', reg: '0x0904', description: 'Parity (0=none)',              value: 'None',      raw: '0',    via: 'KEYPAD' },
-    { param: '09-05', reg: '0x0905', description: 'Data bits (0=8 bit)',          value: '8 bit',     raw: '0',    via: 'KEYPAD' },
-    { param: '09-07', reg: '0x0907', description: 'Comm timeout action',         value: 'Keep running + COT', raw: '3', via: 'Modbus' },
-    { param: '02-01', reg: '0x0201', description: 'Rated current (0.1 A)',       value: '0.85 A → 9', raw: '9',  via: 'Modbus', note: '0.85 A rounds to 0.9 A (raw 9); nameplate is 0.85' },
-    { param: '02-03', reg: '0x0203', description: 'Rated speed (rpm)',            value: '850 rpm',   raw: '850',  via: 'KEYPAD', note: '850 > 255' },
-    { param: '02-04', reg: '0x0204', description: 'Rated voltage (0.1 V)',       value: '⚠ CONFIRM — see note', raw: '?', via: 'KEYPAD', note: '⚠ 230V delta motor: if 400V-class drive → raw 2300 is OOB (range 3230~5280). Confirm drive class. If motor rewired star for 400V supply → use 4000. If 230V-class drive → use 2300.' },
-    { param: '02-05', reg: '0x0205', description: 'Rated power (0.1 kW)',        value: '0.1 kW (min)', raw: '1', via: 'Modbus', note: '0.09 kW nameplate < 0.1 kW minimum — write 1 (drive minimum)' },
-    { param: '02-06', reg: '0x0206', description: 'Rated freq (0.1 Hz)',         value: '50.0 Hz',   raw: '500',  via: 'KEYPAD', note: '500 > 255' },
-    { param: '02-07', reg: '0x0207', description: 'Poles',                       value: '— (unknown)', raw: '?', via: 'KEYPAD', note: 'Pole count not on nameplate — read from motor or calculate: 120×50/850 ≈ 7.06 → likely 6-pole (sync 1000 rpm) or 8-pole (sync 750 rpm); 850 rpm slip suggests 6-pole. Confirm.' },
-    { param: '00-02', reg: '0x0002', description: 'Run command source (2=Comm)', value: 'Communication', raw: '2', via: 'Modbus' },
-    { param: '00-05', reg: '0x0005', description: 'Freq cmd source (5=Comm)',    value: 'Comm (reg 0x2502)', raw: '5', via: 'Modbus' },
-    { param: '00-12', reg: '0x000C', description: 'Freq upper limit (0.1 Hz)',   value: '50.0 Hz',   raw: '500',  via: 'KEYPAD', note: '500 > 255' },
-    { param: '00-13', reg: '0x000D', description: 'Freq lower limit (0.1 Hz)',   value: '0.0 Hz',    raw: '0',    via: 'Modbus' },
-    { param: '00-14', reg: '0x000E', description: 'Accel time 1 (0.1 s)',        value: '10.0 s',    raw: '100',  via: 'Modbus', note: 'Slow load — increase to 30 s (raw 300) if it jerks' },
-    { param: '00-15', reg: '0x000F', description: 'Decel time 1 (0.1 s)',        value: '10.0 s',    raw: '100',  via: 'Modbus' },
-  ],
-}
-
-const DRIVES: Drive[] = [SPINNER, AGITATOR1, AGITATOR2, TRACE_CHAIN]
-
-// Modbus CLI snippets (post-commissioning, once 09-00/01/02 set via keypad)
-function modbusSnippet(drive: Drive): string {
-  const modbusParams = drive.params.filter(p => p.via === 'Modbus' && p.raw !== '?' && p.param !== '09-07')
-  const lines = [
-    `# ${drive.name} — node ${drive.node} — Modbus-settable params`,
-    `# Run on panel: sudo python3 /home/bfa/teco_cli.py write ${drive.node} <param> <value> --baud 9600 --mode rtu`,
-    '',
-    ...modbusParams.map(p => `write ${drive.node} ${p.param} ${p.raw}   # ${p.description} → ${p.value}`),
-    '',
-    `# Set run source + freq source (enables Modbus control):`,
-    `write ${drive.node} 0-02 2`,
-    `write ${drive.node} 0-05 5`,
-    '',
-    `# Verify state:`,
-    `info ${drive.node} --baud 9600 --mode rtu`,
+// Shared comm config — IDENTICAL on every drive except the slave address.
+// 19200 8E1 matches the PLC SerialLineConfiguration (Baud19200 / ParityEven /
+// DataBits8 / StopBits1) in make_final.py.
+function commParams(slave: number, family: 'ATV12' | 'ATV320'): Param[] {
+  // ATV12: COnF > FULL > COM- ;  ATV320: COMM > Md1-
+  const grp = family === 'ATV12' ? 'COM-' : 'Md1-'
+  return [
+    { param: `${grp} Add`,  code: 'Add',  description: 'Modbus slave address',  value: String(slave), via: 'KEYPAD', note: 'Must match the PLC IOScanner slave (1-4). Set FIRST.' },
+    { param: `${grp} tbr`,  code: 'tbr',  description: 'Modbus baud rate',      value: '19.2 kbps',   via: 'KEYPAD', note: 'PLC SL1 = 19200. Mismatch = no comms.' },
+    { param: `${grp} tFO`,  code: 'tFO',  description: 'Modbus format',         value: '8E1',         via: 'KEYPAD', note: '8 data / Even parity / 1 stop — matches PLC ParityEven.' },
+    { param: `${grp} ttO`,  code: 'ttO',  description: 'Modbus timeout (s)',    value: '10.0 s',      via: 'KEYPAD', note: 'Comms-loss action; keep > IOScanner cycle (20 ms).' },
   ]
-  return lines.join('\n')
 }
+
+// Control config — run/ref from Modbus (the IOScanner), not the terminals/keypad.
+function controlParams(family: 'ATV12' | 'ATV320'): Param[] {
+  if (family === 'ATV320') {
+    return [
+      { param: 'CtL- Fr1', code: 'Fr1', description: 'Reference 1 channel',  value: 'Modbus (Mdb)', via: 'KEYPAD', note: 'Speed reference from the PLC LFRD register.' },
+      { param: 'CtL- Cd1', code: 'Cd1', description: 'Command channel 1',    value: 'Modbus (Mdb)', via: 'KEYPAD', note: 'Run/stop from the PLC CMD register.' },
+      { param: 'CtL- CHCF', code: 'CHCF', description: 'Profile',            value: 'Separate (SEP)', via: 'KEYPAD', note: 'Separate ref/cmd so both come from Modbus.' },
+    ]
+  }
+  return [
+    { param: 'CtL- Fr1', code: 'Fr1', description: 'Reference 1 channel',  value: 'Modbus (Mdb)', via: 'KEYPAD', note: 'ATV12: speed reference from the PLC LFRD register.' },
+    { param: 'CtL- CHCF', code: 'CHCF', description: 'Control mode',        value: 'Modbus',       via: 'KEYPAD', note: 'Run/stop via the PLC CMD register (ETA/CMD profile).' },
+  ]
+}
+
+// ── TRACE CHAIN  slave 1 = %DRV0  (ATV12) ──────────────────────────────────────
+// Nameplate (VSD Nameplates): 230 V / 50 Hz / 850 rpm / 0.09 kW / 0.85 A / Δ
+// ⚠ 230 V delta motor — confirm the drive is a 230 V-class ATV12, or the motor
+//   is rewired star for a 400 V supply, before entering UnS.
+const TRACE: Drive = {
+  slave: 1, drv: '%DRV0', name: 'Trace Chain', family: 'ATV12',
+  cmdBit: '%MW0:X10', hzReg: '%MW43', permit: '%M44',
+  params: [
+    ...commParams(1, 'ATV12'),
+    { param: 'drC- bFr', code: 'bFr', description: 'Standard motor freq', value: '50 Hz', via: 'KEYPAD' },
+    { param: 'drC- UnS', code: 'UnS', description: 'Rated motor voltage',  value: '⚠ CONFIRM (230 V Δ)', via: 'KEYPAD', note: '230 V delta: confirm drive is 230 V-class (UnS=230) OR motor rewired star for 400 V (UnS=400). DO NOT guess.' },
+    { param: 'drC- FrS', code: 'FrS', description: 'Rated motor freq',     value: '50.0 Hz', via: 'KEYPAD' },
+    { param: 'drC- nCr', code: 'nCr', description: 'Rated motor current',  value: '0.85 A', via: 'KEYPAD', note: 'Nameplate 0.85 A.' },
+    { param: 'drC- nSP', code: 'nSP', description: 'Rated motor speed',    value: '850 rpm', via: 'KEYPAD', note: 'Pole count not on plate — 850 rpm slip ⇒ likely 6-pole. Confirm.' },
+    ...controlParams('ATV12'),
+    { param: 'SEt- ACC', code: 'ACC', description: 'Acceleration time',    value: '10.0 s', via: 'KEYPAD', note: 'Slow load — increase to 30 s if it jerks.' },
+    { param: 'SEt- dEC', code: 'dEC', description: 'Deceleration time',    value: '10.0 s', via: 'KEYPAD' },
+    { param: 'SEt- HSP', code: 'HSP', description: 'High speed (max Hz)',  value: '50.0 Hz', via: 'KEYPAD' },
+    { param: 'SEt- LSP', code: 'LSP', description: 'Low speed (min Hz)',   value: '0.0 Hz', via: 'KEYPAD' },
+  ],
+}
+
+// ── AGITATOR 1  slave 2 = %DRV1  (ATV12) ───────────────────────────────────────
+// Nameplate: 400 V / 50 Hz / 1410 rpm / 2.2 kW / 5.0 A / 4-pole / Y
+const AG1: Drive = {
+  slave: 2, drv: '%DRV1', name: 'Agitator 1', family: 'ATV12',
+  cmdBit: '%MW0:X3', hzReg: '%MW41', permit: '%M45',
+  params: [
+    ...commParams(2, 'ATV12'),
+    { param: 'drC- bFr', code: 'bFr', description: 'Standard motor freq', value: '50 Hz', via: 'KEYPAD' },
+    { param: 'drC- UnS', code: 'UnS', description: 'Rated motor voltage',  value: '400 V', via: 'KEYPAD' },
+    { param: 'drC- FrS', code: 'FrS', description: 'Rated motor freq',     value: '50.0 Hz', via: 'KEYPAD' },
+    { param: 'drC- nCr', code: 'nCr', description: 'Rated motor current',  value: '5.0 A', via: 'KEYPAD' },
+    { param: 'drC- nSP', code: 'nSP', description: 'Rated motor speed',    value: '1410 rpm', via: 'KEYPAD', note: '4-pole.' },
+    ...controlParams('ATV12'),
+    { param: 'SEt- ACC', code: 'ACC', description: 'Acceleration time',    value: '10.0 s', via: 'KEYPAD' },
+    { param: 'SEt- dEC', code: 'dEC', description: 'Deceleration time',    value: '10.0 s', via: 'KEYPAD' },
+    { param: 'SEt- HSP', code: 'HSP', description: 'High speed (max Hz)',  value: '50.0 Hz', via: 'KEYPAD' },
+    { param: 'SEt- LSP', code: 'LSP', description: 'Low speed (min Hz)',   value: '0.0 Hz', via: 'KEYPAD' },
+  ],
+}
+
+// ── AGITATOR 2  slave 3 = %DRV2  (ATV12) ───────────────────────────────────────
+// Nameplate: 420 V / 50 Hz / 1445 rpm / 1.5 kW / 3.3 A / 4-pole / Y
+const AG2: Drive = {
+  slave: 3, drv: '%DRV2', name: 'Agitator 2', family: 'ATV12',
+  cmdBit: '%MW0:X9', hzReg: '%MW42', permit: '%M46',
+  params: [
+    ...commParams(3, 'ATV12'),
+    { param: 'drC- bFr', code: 'bFr', description: 'Standard motor freq', value: '50 Hz', via: 'KEYPAD' },
+    { param: 'drC- UnS', code: 'UnS', description: 'Rated motor voltage',  value: '420 V', via: 'KEYPAD' },
+    { param: 'drC- FrS', code: 'FrS', description: 'Rated motor freq',     value: '50.0 Hz', via: 'KEYPAD' },
+    { param: 'drC- nCr', code: 'nCr', description: 'Rated motor current',  value: '3.3 A', via: 'KEYPAD' },
+    { param: 'drC- nSP', code: 'nSP', description: 'Rated motor speed',    value: '1445 rpm', via: 'KEYPAD', note: '4-pole.' },
+    ...controlParams('ATV12'),
+    { param: 'SEt- ACC', code: 'ACC', description: 'Acceleration time',    value: '10.0 s', via: 'KEYPAD' },
+    { param: 'SEt- dEC', code: 'dEC', description: 'Deceleration time',    value: '10.0 s', via: 'KEYPAD' },
+    { param: 'SEt- HSP', code: 'HSP', description: 'High speed (max Hz)',  value: '50.0 Hz', via: 'KEYPAD' },
+    { param: 'SEt- LSP', code: 'LSP', description: 'Low speed (min Hz)',   value: '0.0 Hz', via: 'KEYPAD' },
+  ],
+}
+
+// ── SPINNER  slave 4 = %DRV3  (ATV320 3 kW) ────────────────────────────────────
+// Nameplate: 420 V / 50 Hz / 964 rpm / 3.0 kW / 7.02 A / 6-pole / Y
+// ATV320 because Schneider has no ATV12 above 3 kW.
+const SPINNER: Drive = {
+  slave: 4, drv: '%DRV3', name: 'Spinner', family: 'ATV320',
+  cmdBit: '%MW0:X2', hzReg: '%MW40', permit: '%M47',
+  params: [
+    ...commParams(4, 'ATV320'),
+    { param: 'SIM- bFr', code: 'bFr', description: 'Standard motor freq', value: '50 Hz', via: 'KEYPAD' },
+    { param: 'SIM- UnS', code: 'UnS', description: 'Rated motor voltage',  value: '420 V', via: 'KEYPAD' },
+    { param: 'SIM- FrS', code: 'FrS', description: 'Rated motor freq',     value: '50.0 Hz', via: 'KEYPAD' },
+    { param: 'SIM- nCr', code: 'nCr', description: 'Rated motor current',  value: '7.0 A', via: 'KEYPAD', note: 'Nameplate 7.02 A.' },
+    { param: 'SIM- nSP', code: 'nSP', description: 'Rated motor speed',    value: '964 rpm', via: 'KEYPAD', note: '6-pole.' },
+    { param: 'SIM- nPr', code: 'nPr', description: 'Rated motor power',    value: '3.0 kW', via: 'KEYPAD' },
+    ...controlParams('ATV320'),
+    { param: 'SEt- ACC', code: 'ACC', description: 'Acceleration time',    value: '10.0 s', via: 'KEYPAD' },
+    { param: 'SEt- dEC', code: 'dEC', description: 'Deceleration time',    value: '10.0 s', via: 'KEYPAD' },
+    { param: 'SEt- HSP', code: 'HSP', description: 'High speed (max Hz)',  value: '50.0 Hz', via: 'KEYPAD' },
+    { param: 'SEt- LSP', code: 'LSP', description: 'Low speed (min Hz)',   value: '0.0 Hz', via: 'KEYPAD' },
+  ],
+}
+
+const DRIVES: Drive[] = [TRACE, AG1, AG2, SPINNER]
 
 export function VsdPrograms({ onClose }: { onClose: () => void }) {
-  const [activeNode, setActiveNode] = useState<number>(5)
-  const [showSnippet, setShowSnippet] = useState(false)
-  const drive = DRIVES.find(d => d.node === activeNode) ?? DRIVES[0]
+  const [activeSlave, setActiveSlave] = useState<number>(1)
+  const drive = DRIVES.find((d) => d.slave === activeSlave) ?? DRIVES[0]
 
   return (
     <div
@@ -186,7 +168,9 @@ export function VsdPrograms({ onClose }: { onClose: () => void }) {
       >
         {/* Header */}
         <div className="sticky top-0 flex items-center justify-between border-b border-gray-700 bg-gray-900 px-5 py-3 shrink-0 rounded-t-xl">
-          <h2 className="text-lg font-semibold text-white">VSD Commissioning Programs — BFD Teco E510</h2>
+          <h2 className="text-lg font-semibold text-white">
+            VSD Commissioning Reference — BFD Schneider ATV (Modbus IOScanner)
+          </h2>
           <button
             onClick={onClose}
             className="rounded-md px-2 py-1 text-gray-400 hover:bg-gray-700 hover:text-white"
@@ -198,132 +182,127 @@ export function VsdPrograms({ onClose }: { onClose: () => void }) {
 
         {/* Intro banner */}
         <div className="px-5 pt-3 pb-0 shrink-0">
-          <div className="rounded-md border border-amber-700/50 bg-amber-900/20 px-3 py-2 text-xs text-amber-300 mb-3">
-            <strong>KEYPAD rule:</strong> On this E510, Modbus func-06 writes to params whose stored value &gt; 255 silently revert
-            to the low byte. func-16 (write-multiple) also reverts <em>and</em> trips CE fault (code 28).
-            Params tagged <span className="font-bold text-amber-200">KEYPAD</span> must be entered on the drive keypad
-            (or via E510 Link Pro software). Params tagged <span className="font-bold text-cyan-300">Modbus</span> commit reliably.
+          <div className="rounded-md border border-cyan-700/50 bg-cyan-900/20 px-3 py-2 text-xs text-cyan-300 mb-3">
+            <strong>Architecture:</strong> all 4 drives on the M221 built-in Modbus
+            Serial IOScanner (SL1), <span className="font-bold text-cyan-200">19200 8E1</span>, slaves 1-4.
+            Run/stop + speed come over Modbus from the PLC (CMD / LFRD registers); the HMI
+            command bits <span className="font-mono">%MW0:Xk</span> and Hz setpoints
+            <span className="font-mono"> %MW40-43</span> feed the drive function blocks in the ladder.
           </div>
-          <div className="rounded-md border border-blue-700/50 bg-blue-900/20 px-3 py-2 text-xs text-blue-300 mb-3">
-            <strong>Group 09 (comm setup)</strong> must be entered via keypad <em>first</em> — the drive cannot receive
-            Modbus until its address/baud/format match the master. Once 09-00/01/02 are set and the bus is wired,
-            the remaining Modbus-tagged params can be written with teco_cli.py.
+          <div className="rounded-md border border-amber-700/50 bg-amber-900/20 px-3 py-2 text-xs text-amber-300 mb-3">
+            <strong>READ-ONLY:</strong> the HMI never writes drive parameters. Key these on the
+            drive (ATV keypad / SoMove) during commissioning. Set the comm params (Add / tbr /
+            tFO) <em>first</em> — the IOScanner can't reach the drive until address + 19200 8E1 match.
           </div>
         </div>
 
         {/* Drive selector tabs */}
-        <div className="flex gap-2 px-5 pb-2 shrink-0">
-          {DRIVES.map(d => (
+        <div className="flex gap-2 px-5 pb-2 shrink-0 flex-wrap">
+          {DRIVES.map((d) => (
             <button
-              key={d.node}
-              onClick={() => { setActiveNode(d.node); setShowSnippet(false) }}
+              key={d.slave}
+              onClick={() => setActiveSlave(d.slave)}
               className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
-                d.node === activeNode
+                d.slave === activeSlave
                   ? 'bg-gray-700 border-gray-500 text-white'
                   : 'bg-gray-800/40 border-gray-700 text-gray-400 hover:text-gray-200 hover:bg-gray-800'
               }`}
             >
-              Node {d.node} — {d.name}
-              {d.node === 4 && <span className="ml-1 text-amber-400">⚠</span>}
+              s{d.slave} · {d.drv} — {d.name}
+              {d.slave === 1 && <span className="ml-1 text-amber-400">⚠</span>}
             </button>
           ))}
-          <div className="flex-1" />
-          <button
-            onClick={() => setShowSnippet(s => !s)}
-            className="px-3 py-1.5 rounded-lg text-xs font-mono border border-gray-600 bg-gray-800/60 text-gray-300 hover:bg-gray-700"
-          >
-            {showSnippet ? 'Hide CLI' : 'teco_cli.py'}
-          </button>
         </div>
 
         {/* Scrollable body */}
         <div className="flex-1 overflow-auto px-5 pb-4 min-h-0">
+          {/* Drive map row */}
+          <div className="mb-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+            <div className="rounded border border-gray-700 bg-gray-800/40 px-3 py-2">
+              <div className="text-gray-500 uppercase tracking-wide">Family</div>
+              <div className="font-semibold text-gray-100">{drive.family}</div>
+            </div>
+            <div className="rounded border border-gray-700 bg-gray-800/40 px-3 py-2">
+              <div className="text-gray-500 uppercase tracking-wide">HMI cmd bit</div>
+              <div className="font-mono text-cyan-300">{drive.cmdBit}</div>
+            </div>
+            <div className="rounded border border-gray-700 bg-gray-800/40 px-3 py-2">
+              <div className="text-gray-500 uppercase tracking-wide">Hz setpoint</div>
+              <div className="font-mono text-cyan-300">{drive.hzReg}</div>
+            </div>
+            <div className="rounded border border-gray-700 bg-gray-800/40 px-3 py-2">
+              <div className="text-gray-500 uppercase tracking-wide">PLC permit</div>
+              <div className="font-mono text-gray-300">{drive.permit}</div>
+            </div>
+          </div>
 
-          {showSnippet ? (
-            <pre className="rounded-lg bg-gray-950 border border-gray-700 p-4 text-xs text-green-300 font-mono whitespace-pre-wrap leading-relaxed">
-              {modbusSnippet(drive)}
-            </pre>
-          ) : (
-            <>
-              {/* Parameter table */}
-              <table className="w-full border-collapse text-xs">
-                <thead>
-                  <tr className="text-left text-gray-400 sticky top-0 bg-gray-900">
-                    <th className="border-b border-gray-700 px-2 py-2 whitespace-nowrap">Param</th>
-                    <th className="border-b border-gray-700 px-2 py-2 whitespace-nowrap">Reg (hex)</th>
-                    <th className="border-b border-gray-700 px-2 py-2">Description</th>
-                    <th className="border-b border-gray-700 px-2 py-2 whitespace-nowrap">Set to</th>
-                    <th className="border-b border-gray-700 px-2 py-2 whitespace-nowrap">Raw int</th>
-                    <th className="border-b border-gray-700 px-2 py-2 whitespace-nowrap">Via</th>
-                    <th className="border-b border-gray-700 px-2 py-2">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {drive.params.map((p, i) => (
-                    <tr
-                      key={p.param}
-                      className={`text-gray-100 ${i % 2 === 0 ? 'bg-gray-900' : 'bg-gray-800/30'}`}
-                    >
-                      <td className="px-2 py-1.5 font-mono text-cyan-400 whitespace-nowrap">{p.param}</td>
-                      <td className="px-2 py-1.5 font-mono text-gray-400 whitespace-nowrap">{p.reg}</td>
-                      <td className="px-2 py-1.5 text-gray-200">{p.description}</td>
-                      <td className="px-2 py-1.5 font-mono whitespace-nowrap text-gray-100">{p.value}</td>
-                      <td className={`px-2 py-1.5 font-mono whitespace-nowrap ${p.raw === '?' ? 'text-amber-400' : 'text-gray-300'}`}>
-                        {p.raw}
-                      </td>
-                      <td className="px-2 py-1.5 whitespace-nowrap">
-                        <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-bold ${
-                          p.via === 'KEYPAD'
-                            ? 'bg-amber-900/60 text-amber-300 border border-amber-700/60'
-                            : 'bg-cyan-900/40 text-cyan-300 border border-cyan-700/40'
-                        }`}>
-                          {p.via}
-                        </span>
-                      </td>
-                      <td className="px-2 py-1.5 text-gray-400 text-xs leading-snug max-w-xs">
-                        {p.note ?? '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Parameter table */}
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr className="text-left text-gray-400 sticky top-0 bg-gray-900">
+                <th className="border-b border-gray-700 px-2 py-2 whitespace-nowrap">Menu</th>
+                <th className="border-b border-gray-700 px-2 py-2 whitespace-nowrap">Code</th>
+                <th className="border-b border-gray-700 px-2 py-2">Description</th>
+                <th className="border-b border-gray-700 px-2 py-2 whitespace-nowrap">Set to</th>
+                <th className="border-b border-gray-700 px-2 py-2 whitespace-nowrap">Via</th>
+                <th className="border-b border-gray-700 px-2 py-2">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {drive.params.map((p, i) => (
+                <tr
+                  key={`${p.param}-${i}`}
+                  className={`text-gray-100 ${i % 2 === 0 ? 'bg-gray-900' : 'bg-gray-800/30'}`}
+                >
+                  <td className="px-2 py-1.5 font-mono text-gray-400 whitespace-nowrap">{p.param}</td>
+                  <td className="px-2 py-1.5 font-mono text-cyan-400 whitespace-nowrap">{p.code}</td>
+                  <td className="px-2 py-1.5 text-gray-200">{p.description}</td>
+                  <td className="px-2 py-1.5 font-mono whitespace-nowrap text-gray-100">{p.value}</td>
+                  <td className="px-2 py-1.5 whitespace-nowrap">
+                    <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-bold ${
+                      p.via === 'KEYPAD'
+                        ? 'bg-amber-900/60 text-amber-300 border border-amber-700/60'
+                        : 'bg-cyan-900/40 text-cyan-300 border border-cyan-700/40'
+                    }`}>
+                      {p.via}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1.5 text-gray-400 text-xs leading-snug max-w-xs">
+                    {p.note ?? '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-              {/* Verify commands */}
-              <div className="mt-4 rounded-md border border-gray-700 bg-gray-950 px-4 py-3 text-xs font-mono text-gray-300">
-                <p className="text-gray-400 mb-1 font-sans not-italic">Quick verify (run on panel after programming):</p>
-                <p className="text-green-300">sudo python3 /home/bfa/teco_cli.py info {drive.node} --baud 9600 --mode rtu</p>
-                <p className="text-green-300 mt-0.5">sudo python3 /home/bfa/teco_cli.py mon {drive.node} --baud 9600 --mode rtu</p>
-              </div>
-
-              {/* Trace Chain voltage warning */}
-              {drive.node === 4 && (
-                <div className="mt-3 rounded-md border border-red-700/60 bg-red-900/20 px-3 py-2 text-xs text-red-300">
-                  <strong>⚠ TRACE CHAIN — CONFIRM BEFORE COMMISSIONING:</strong> Motor is 230 V delta.
-                  A 400V-class E510 has voltage range 323.0~528.0 V for param 02-04 — entering 230 V (raw 2300)
-                  is <em>outside that range</em>. On-site, confirm: (a) is the drive a 230V-class unit? or
-                  (b) has the motor been rewired star for a 400V supply?
-                  If star/400V → enter 4000. If 230V drive confirmed → enter 2300.
-                  Also: pole count not stated on nameplate — calculate 120×50/850≈7.1, likely 6-pole
-                  (sync 1000 rpm). Confirm on motor data plate or manufacturers data.
-                </div>
-              )}
-
-              {/* Comm sequence reminder */}
-              <div className="mt-3 rounded-md border border-gray-700 bg-gray-800/30 px-3 py-2 text-xs text-gray-300">
-                <p className="font-semibold text-gray-200 mb-1">Commissioning sequence (one drive at a time):</p>
-                <ol className="list-decimal list-inside space-y-0.5">
-                  <li>Power drive. Key all Group 09 params (addr/baud/format) via keypad.</li>
-                  <li>Key KEYPAD-tagged Group 02 nameplate params (speed/voltage/freq) via keypad or E510 Link Pro.</li>
-                  <li>Key 00-12 freq upper limit via keypad.</li>
-                  <li>Connect bus. Run: <code className="text-cyan-300">teco_cli.py scan</code> — confirm drive responds.</li>
-                  <li>Write Modbus-tagged params: current, power, poles, 00-02, 00-05, 00-13, 00-14, 00-15.</li>
-                  <li>Read back to verify: <code className="text-cyan-300">teco_cli.py info {drive.node}</code></li>
-                  <li>With E-stop confirmed: <code className="text-cyan-300">teco_cli.py freq {drive.node} 10.0 &amp;&amp; teco_cli.py run {drive.node}</code></li>
-                  <li>Check direction, current, no faults. Ramp to 50 Hz.</li>
-                </ol>
-              </div>
-            </>
+          {/* Trace Chain voltage warning */}
+          {drive.slave === 1 && (
+            <div className="mt-3 rounded-md border border-red-700/60 bg-red-900/20 px-3 py-2 text-xs text-red-300">
+              <strong>⚠ TRACE CHAIN — CONFIRM BEFORE COMMISSIONING:</strong> motor is 230 V delta.
+              Confirm whether its drive is a 230 V-class ATV12 (UnS = 230) or the motor has been
+              rewired star for the 400 V supply (UnS = 400). Pole count is not on the nameplate —
+              850 rpm implies ~6-pole; confirm on the motor data plate. DO NOT guess UnS.
+            </div>
           )}
+
+          {/* Commissioning checklist */}
+          <div className="mt-3 rounded-md border border-gray-700 bg-gray-800/30 px-3 py-2 text-xs text-gray-300">
+            <p className="font-semibold text-gray-200 mb-1">Commissioning sequence (one drive at a time):</p>
+            <ol className="list-decimal list-inside space-y-0.5">
+              <li>Power the drive. Key the comm params: <span className="font-mono text-cyan-300">Add</span> = slave {drive.slave},
+                <span className="font-mono text-cyan-300"> tbr</span> = 19.2k, <span className="font-mono text-cyan-300">tFO</span> = 8E1.</li>
+              <li>Key the motor nameplate (UnS / FrS / nCr / nSP{drive.family === 'ATV320' ? ' / nPr' : ''}) from the data plate.</li>
+              <li>Set control to Modbus: <span className="font-mono text-cyan-300">Fr1</span> / <span className="font-mono text-cyan-300">{drive.family === 'ATV320' ? 'Cd1' : 'CHCF'}</span> = Modbus.</li>
+              <li>Set ramps <span className="font-mono text-cyan-300">ACC</span>/<span className="font-mono text-cyan-300">dEC</span> and limits <span className="font-mono text-cyan-300">HSP</span>/<span className="font-mono text-cyan-300">LSP</span>.</li>
+              <li>Wire SL1 (A/B/0V). In MEB, the IOScanner shows slave {drive.slave} ({drive.drv}) online (no Modbus comms fault).</li>
+              <li>With E-stop confirmed: from the HMI tap {drive.name} ON ({drive.cmdBit}) and set a low Hz ({drive.hzReg}); confirm direction, current, no faults.</li>
+              <li>Ramp to 50 Hz; verify smooth run. Repeat for the next drive.</li>
+            </ol>
+            <p className="mt-2 text-gray-500">
+              Drive status is read back by the PLC <span className="font-mono">MC_ReadStatus_ATV</span> function block each
+              scan; actual-RPM feedback to the HMI (RFRD read words) is a deferred phase-2 item.
+            </p>
+          </div>
         </div>
       </div>
     </div>
