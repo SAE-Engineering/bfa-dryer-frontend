@@ -2,7 +2,7 @@
 // VSD reference buttons: Nameplates + Commissioning Programs.
 // Designed for 1920×1200 @224 PPI industrial panel — text/LEDs large enough to read at a glance.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useControlStore } from '../store/controlStore'
 import { VsdNameplates } from './VsdNameplates'
 import { VsdPrograms } from './VsdPrograms'
@@ -24,6 +24,23 @@ export const StatusBar = () => {
   const dryer = useControlStore((s) => s.dryer)
   const wsStatus = useControlStore((s) => s.wsStatus)
   const clock = useClock()
+
+  // Hidden diagnostics gesture: a ~2 s long-press on the SAE logo opens the
+  // diag screen (#diag). The kiosk has no URL bar, so this is the discreet way
+  // in. Pointer-based so it works on the touch panel and with a mouse.
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const startDiagPress = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current)
+    longPressTimer.current = setTimeout(() => {
+      window.location.hash = 'diag'
+    }, 2000)
+  }
+  const cancelDiagPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+  }
 
   const connLabel =
     wsStatus === 'open'
@@ -99,6 +116,11 @@ export const StatusBar = () => {
     >
       {/* SAE Engineering logo — light pill backing so navy SVG reads on dark bg */}
       <div
+        onPointerDown={startDiagPress}
+        onPointerUp={cancelDiagPress}
+        onPointerLeave={cancelDiagPress}
+        onPointerCancel={cancelDiagPress}
+        title=""
         style={{
           background: 'rgba(255,255,255,0.10)',
           borderRadius: '10px',
@@ -106,6 +128,7 @@ export const StatusBar = () => {
           display: 'flex',
           alignItems: 'center',
           flexShrink: 0,
+          cursor: 'default',
         }}
       >
         <img

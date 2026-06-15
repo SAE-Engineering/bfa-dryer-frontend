@@ -91,3 +91,22 @@ export interface HealthResponse {
   connected: boolean
   sim: boolean
 }
+
+// Hidden diagnostics screen — GET /api/diag (raw register / bit dump)
+
+export interface DiagConn {
+  connected: boolean
+  host: string
+  port: number
+  proto: string
+  sim: boolean
+  released: boolean
+  errors: string[]
+}
+
+export interface DiagState {
+  ts: string
+  conn: DiagConn
+  mw: Record<string, number | null>
+  m: Record<string, boolean | null>
+}

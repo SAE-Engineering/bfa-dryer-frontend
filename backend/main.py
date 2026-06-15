@@ -293,6 +293,100 @@ async def plc_released_status():
     }
 
 
+# ---------------------------------------------------------------------------
+# Hidden diagnostics — GET /api/diag
+# Read-only raw register / bit dump for on-panel fault-finding (no MEB needed).
+# NEVER writes to the PLC.  Reads a fixed set of %MW words + %M bits each call
+# via the UMAS client's read_many / read_bits (one round-trip each).  On any
+# read failure it returns null values + a note in conn.errors — never 500.
+# ---------------------------------------------------------------------------
+
+# %MW words surfaced on the diag screen (command word, mode, heartbeat, temps,
+# Hz setpoints, burner/scorch setpoints, clear/re-enable words).
+DIAG_MW_ADDRS = [0, 2, 10, 11, 31, 32, 33, 34, 40, 41, 42, 43, 44, 45, 46, 49, 48, 50, 52]
+# %M bits: inputs/mirrors, fault latches, drive-status mirrors.
+DIAG_M_ADDRS = [0, 1, 2, 3, 4, 5, 20, 21, 22, 23, 80, 81, 82, 83, 88, 89, 90, 91]
+
+
+@app.get("/api/diag")
+async def diag():
+    """Raw %MW / %M dump for the hidden on-panel diagnostics screen.
+
+    Read-only.  Returns {ts, conn, mw, m}; on any read error the affected
+    values are null and a note is added to conn.errors (never raises 500).
+    """
+    from datetime import datetime, timezone
+
+    errors: list[str] = []
+    mw: dict[str, int | None] = {}
+    m: dict[str, bool | None] = {}
+
+    client = plc_client
+    can_read_mw = client is not None and hasattr(client, "read_many")
+    can_read_m = client is not None and hasattr(client, "read_bits")
+
+    # --- %MW words ---------------------------------------------------------
+    if can_read_mw:
+        try:
+            res = await client.read_many(DIAG_MW_ADDRS)
+            if res is None:
+                errors.append("read_many returned None (PLC read failed)")
+                for a in DIAG_MW_ADDRS:
+                    mw[str(a)] = None
+            else:
+                for a in DIAG_MW_ADDRS:
+                    mw[str(a)] = res.get(a)
+                    if a not in res:
+                        errors.append(f"%MW{a} missing from read_many result")
+        except Exception as e:  # never bubble up
+            errors.append(f"read_many error: {e}")
+            for a in DIAG_MW_ADDRS:
+                mw[str(a)] = None
+    else:
+        errors.append("client has no read_many (sim/modbus path) — %MW unavailable")
+        for a in DIAG_MW_ADDRS:
+            mw[str(a)] = None
+
+    # --- %M bits -----------------------------------------------------------
+    if can_read_m:
+        try:
+            res = await client.read_bits(DIAG_M_ADDRS)
+            if res is None:
+                errors.append("read_bits returned None (PLC read failed)")
+                for a in DIAG_M_ADDRS:
+                    m[str(a)] = None
+            else:
+                for a in DIAG_M_ADDRS:
+                    m[str(a)] = res.get(a)
+                    if a not in res:
+                        errors.append(f"%M{a} missing from read_bits result")
+        except Exception as e:
+            errors.append(f"read_bits error: {e}")
+            for a in DIAG_M_ADDRS:
+                m[str(a)] = None
+    else:
+        errors.append("client has no read_bits (sim/modbus path) — %M unavailable")
+        for a in DIAG_M_ADDRS:
+            m[str(a)] = None
+
+    conn = {
+        "connected": bool(client.is_connected) if client is not None else False,
+        "host":      settings.PLC_HOST,
+        "port":      settings.PLC_PORT,
+        "proto":     settings.PLC_PROTO,
+        "sim":       settings.PLC_SIM,
+        "released":  plc_gate.is_released(),
+        "errors":    errors,
+    }
+
+    return {
+        "ts":   datetime.now(timezone.utc).isoformat(),
+        "conn": conn,
+        "mw":   mw,
+        "m":    m,
+    }
+
+
 # Serve the built React frontend if it exists.
 # MUST be mounted AFTER all @app.get / @app.post route definitions so
 # FastAPI's router matches API paths first.

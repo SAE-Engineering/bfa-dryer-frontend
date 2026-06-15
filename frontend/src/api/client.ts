@@ -8,6 +8,7 @@ import {
   SetpointRequest,
   HealthResponse,
   DryerState,
+  DiagState,
 } from '../types'
 
 async function post<T>(path: string, body: unknown): Promise<T> {
@@ -46,6 +47,9 @@ export const api = {
   getState: () => get<DryerState>('/api/state'),
 
   getHealth: () => get<HealthResponse>('/api/health'),
+
+  // Hidden diagnostics — raw %MW / %M register dump (read-only).
+  getDiag: () => get<DiagState>('/api/diag'),
 
   // PLC release/take — drop the HMI's PLC link so MEB can take it (PIN-gated).
   releasePlc: (pin: string) =>
