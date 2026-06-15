@@ -44,12 +44,39 @@ from app.components import (
     REG_FAULT_WORD,
     REG_SPEED_ACT_BASE,
     REG_TEMP_BASE,
-    BIT_FAN_PROVEN,
-    BIT_SAFETY_OK,
     SETPOINT_REG_MAP,
     REG_BURNER_SP,
+    # Live %M (safety / fault) model — read via UMAS 0x24 class 0x02.
+    M_READ_ADDRS,
+    M_SAFETY_OK,
+    M_HOT_FAN_ON,
+    M_FIRE_TRIP,
+    M_OVER_TEMP,
+    M_SCORCH,
+    FAULT_DEFS,
+    # Simulator-only register/bit model (modbus sim path).
+    SIM_BIT_FAN_PROVEN,
+    SIM_BIT_SAFETY_OK,
 )
 from app import plc_gate
+
+
+def _faults_from_m_bits(m_bits: dict) -> list[dict]:
+    """Build the State `faults` list from the read %M fault-latch bits.
+
+    `m_bits` is {m_addr: bool} as returned by read_bits.  Each FAULT_DEFS entry
+    whose latch bit is set becomes one fault dict {id, label, severity}.  Empty
+    list = no active faults (UI banner clears).
+    """
+    faults = []
+    for addr, defn in FAULT_DEFS.items():
+        if m_bits.get(addr):
+            faults.append({
+                "id":       defn["id"],
+                "label":    defn["label"],
+                "severity": defn["severity"],
+            })
+    return faults
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +132,7 @@ def _released_state(settings, license_mgr=None) -> dict:
         "sim":        settings.PLC_SIM,
         "safety_ok":  True,
         "fan_proven": False,
+        "faults":     [],
         "components": [
             {
                 "id":        c.id,
@@ -134,41 +162,71 @@ def _released_state(settings, license_mgr=None) -> dict:
 
 async def _build_state_umas(client, settings, license_mgr=None) -> dict:
     """
-    UMAS path: read %MW0,31,32,33,34,45,46,49 in one burst.
-    %MW0 = command word; cmd==running (ladder wires %Q = %MW0:Xn directly).
+    LIVE UMAS path (final PLC `BFD_final.smbp`):
+
+    Two func-0x24 reads per poll:
+      1. %MW burst  — command word %MW0, temps %MW31-34, burner setpoints
+         %MW45/46/49, and the commanded drive Hz %MW40-44 (for speed display).
+      2. %M  burst  — real safety %M4, fault latches %M20/21/22, hot-fan-on %M23
+         (via read_bits, object class 0x02 — see umas_client.read_bits).
+
+    The final program has NO per-component running-word mirror, so "running" is
+    reported as the commanded state (%MW0 bit).  Speeds shown are COMMANDED (the
+    Hz the HMI wrote, read back from %MW40-44); actual-RPM feedback is deferred.
+    Per-component fault + global safety/fault annunciation come from the %M bits.
     """
-    addrs = [0, 31, 32, 33, 34, 45, 46, 49]
-    regs = await client.read_many(addrs)
+    # %MW burst: command word, temps, burner setpoints, commanded drive Hz.
+    mw_addrs = [0, 31, 32, 33, 34, 45, 46, 49, 40, 41, 42, 43, 44]
+    regs = await client.read_many(mw_addrs)
 
     if regs is None:
-        # Connection failed — build a disconnected state with last-known zeroes
+        # %MW read failed → connection down. Zeroed last-known + safety unknown.
         cmd_word = 0
         temps_raw = {31: 0, 32: 0, 33: 0, 34: 0}
-        burner_sp_raw = 0
-        band_raw = 0
-        product_raw = 0
+        burner_sp_raw = band_raw = product_raw = 0
+        speed_raw = {}
         connected = False
     else:
         cmd_word = regs.get(0, 0)
-        temps_raw = {31: regs.get(31, 0), 32: regs.get(32, 0),
-                     33: regs.get(33, 0), 34: regs.get(34, 0)}
+        temps_raw = {r: regs.get(r, 0) for r in (31, 32, 33, 34)}
         burner_sp_raw = regs.get(45, 0)
         band_raw = regs.get(46, 0)
         product_raw = regs.get(49, 0)
+        speed_raw = {r: regs.get(r, 0) for r in (40, 41, 42, 43, 44)}
         connected = True
 
-    # On this PLC cmd == running (no separate running word)
-    running_word = cmd_word
-    fault_word = 0   # not used in current ladder
-
-    safety_ok  = bool(running_word & (1 << BIT_SAFETY_OK))
-    fan_proven = bool(running_word & (1 << BIT_FAN_PROVEN))
+    # %M burst: real safety + fault latches + hot-fan-on (status, not command).
+    m_bits = await client.read_bits(M_READ_ADDRS)
+    if m_bits is None:
+        # %M read failed (but %MW may have succeeded). The HARDWARE safety relay
+        # is the real protection; the HMI annunciator falls back to last-known OK
+        # and the connection indicator reflects the comms problem.
+        m_bits = {}
+        safety_ok = True
+        fan_proven = False
+        faults: list[dict] = []
+        if not connected:
+            connected = False
+    else:
+        safety_ok  = bool(m_bits.get(M_SAFETY_OK, True))
+        fan_proven = bool(m_bits.get(M_HOT_FAN_ON, False))
+        faults = _faults_from_m_bits(m_bits)
 
     components = []
     for comp in COMPONENTS:
-        cmd     = bool(cmd_word     & (1 << comp.cmd_bit))
-        running = bool(running_word & (1 << comp.status_bit))
-        fault   = bool(fault_word   & (1 << comp.status_bit))
+        cmd = bool(cmd_word & (1 << comp.cmd_bit))
+        # No running-word mirror on the final program → running == commanded.
+        running = cmd
+        # Per-component fault from its mapped %M latch (if any).
+        fault = bool(comp.fault_bit is not None and m_bits.get(comp.fault_bit))
+        # Commanded speed display: read-back of the Hz setpoint, scaled to %.
+        speed_pct = 0.0
+        if comp.has_speed and comp.speed_sp_reg is not None:
+            raw = speed_raw.get(comp.speed_sp_reg, 0)
+            if comp.speed_unit == "hz":
+                speed_pct = round(min(100.0, raw / 50.0 * 100.0), 1)  # 0-50 Hz → %
+            else:
+                speed_pct = round(min(100.0, float(raw)), 1)          # already %
         components.append({
             "id":        comp.id,
             "label":     comp.label,
@@ -178,19 +236,17 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
             "cmd":       cmd,
             "running":   running,
             "fault":     fault,
-            "speed_pct": 0.0,   # VSD actuals not wired yet
+            "speed_pct": speed_pct,
         })
 
     temps = {
-        "hotfan_motor": 0.0,                              # %MW30 sensor not wired
+        "hotfan_motor": 0.0,                              # %MW30 not wired (final)
         "burner":       round(temps_raw[31] / 10.0, 1),
         "product1":     round(temps_raw[32] / 10.0, 1),
         "product2":     round(temps_raw[33] / 10.0, 1),
         "exhaust":      round(temps_raw[34] / 10.0, 1),
     }
 
-    # Setpoints from the burst — manual program registers:
-    #   %MW45 burner target, %MW46 hysteresis band, %MW49 product scorch trip.
     setpoints = {
         "burner_target": round(burner_sp_raw / 10.0, 1),
         "burner_band":   round(band_raw / 10.0, 1),
@@ -205,6 +261,7 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
         "sim":        settings.PLC_SIM,
         "safety_ok":  safety_ok,
         "fan_proven": fan_proven,
+        "faults":     faults,
         "components": components,
         "temps":      temps,
         "setpoints":  setpoints,
@@ -250,16 +307,33 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
         for i, val in enumerate(temp_regs_raw):
             temps_raw[REG_TEMP_BASE + i] = val
 
-    # Safety / fan proven bits
-    safety_ok  = bool(running_word & (1 << BIT_SAFETY_OK))
-    fan_proven = bool(running_word & (1 << BIT_FAN_PROVEN))
+    # Safety / fan proven from the sim's %MW20 status word (X14 safety, X13 fan).
+    safety_ok  = bool(running_word & (1 << SIM_BIT_SAFETY_OK))
+    fan_proven = bool(running_word & (1 << SIM_BIT_FAN_PROVEN))
+
+    # Build temps dict (°C with 1 decimal)
+    temps = {}
+    for key, reg in TEMP_REGS.items():
+        raw = temps_raw.get(reg, 0)
+        temps[key] = round(raw / 10.0, 1)
+
+    # Derive faults from sim temps crossing the PLC trip thresholds, so the
+    # fault annunciation UI is testable purely against the simulator (drive the
+    # burner hot → over-temp / scorch / fire latch).  Thresholds mirror the
+    # final PLC: fire 120.0, over-temp 98.0, scorch 92.0 (product1/2).
+    sim_faults: dict[int, bool] = {
+        M_FIRE_TRIP: any(temps[k] >= 120.0 for k in ("burner", "product1", "product2", "exhaust")),
+        M_OVER_TEMP: any(temps[k] >= 98.0  for k in ("burner", "product1", "product2", "exhaust")),
+        M_SCORCH:    any(temps[k] >= 92.0  for k in ("product1", "product2")),
+    }
+    faults = _faults_from_m_bits(sim_faults)
 
     # Build component list
     components = []
     for comp in COMPONENTS:
         cmd     = bool(cmd_word     & (1 << comp.cmd_bit))
         running = bool(running_word & (1 << comp.status_bit))
-        fault   = bool(fault_word   & (1 << comp.status_bit))
+        fault   = bool(comp.fault_bit is not None and sim_faults.get(comp.fault_bit))
 
         speed_pct = 0.0
         if comp.has_speed and comp.speed_act_reg is not None:
@@ -277,12 +351,6 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
             "fault":     fault,
             "speed_pct": speed_pct,
         })
-
-    # Build temps dict (°C with 1 decimal)
-    temps = {}
-    for key, reg in TEMP_REGS.items():
-        raw = temps_raw.get(reg, 0)
-        temps[key] = round(raw / 10.0, 1)
 
     # Read operator setpoint registers
     sp_reg_addrs = list(SETPOINT_REG_MAP.values())
@@ -303,6 +371,7 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
         "sim":        settings.PLC_SIM,
         "safety_ok":  safety_ok,
         "fan_proven": fan_proven,
+        "faults":     faults,
         "components": components,
         "temps":      temps,
         "setpoints":  setpoints,
