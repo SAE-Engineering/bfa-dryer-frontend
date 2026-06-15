@@ -203,6 +203,87 @@ class UmasMwClient:
             return None
         return result.get(n)
 
+    # ------------------------------------------------------------------
+    # %M (memory bit) read — UMAS func 0x24, object class 0x02
+    # ------------------------------------------------------------------
+    #
+    # Object-class byte for the 0x24 multi-read selects the variable table:
+    #   class 0x03 = %MW (word, 2-byte value)   ← read_many()
+    #   class 0x02 = %M  (memory bit, 1-byte value, 0/1)
+    # Confirmed byte-for-byte from MEB animation-table captures (2026-06-15):
+    # MEB polled %M0/%M1/%M2/%M199 with descriptor [0x02, 0x02, addr_lo, addr_hi,
+    # 0x01, 0x00] and the PLC answered each item as [0x00, 0x00, bit] (1 data byte),
+    # decoding to %M0=1 %M1=0 %M2=1 %M199=0 — exactly the resting program state.
+    # See ~/projects/bfa-plc-cli/M221_ADDRESS_MAP.md §6d and UMAS_PROTOCOL.md §2.
+    #
+    # Reads use pairing 0x00 (no reservation), so this survives the BFAplc
+    # read-protect (which only gates the 0x28 program-block upload).
+
+    M_OBJECT_CLASS = 0x02   # %M (memory bit) object class for func 0x24
+
+    async def read_bits(self, addrs: list[int]) -> Optional[dict[int, bool]]:
+        """
+        Read multiple %M (memory bit) addresses in one 0x24 round-trip.
+        Returns {addr: bool} or None on error.
+
+        Request body (func 0x24):
+          [count] then per-address: [0x02, 0x02, addr_lo, addr_hi, 0x01, 0x00]
+          (the second 0x02 is the %M object class; 0x03 would be %MW).
+
+        Response body after MBAP:
+          [0x5A, pairing=0x00, 0xFE, count]  then count × per-item groups:
+          each %M item = [0x00, 0x00, bit]  (3 bytes; bit = 0 or 1).
+          → bool(bit & 1).
+        """
+        if not addrs:
+            return {}
+        payload = bytes([len(addrs)])
+        for a in addrs:
+            payload += bytes([2, self.M_OBJECT_CLASS, a & 0xFF, (a >> 8) & 0xFF, 1, 0])
+
+        async with self._lock:
+            if self._sock is None:
+                if not await self._reconnect():
+                    return None
+            try:
+                sock = self._sock
+                body = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self._sync_exchange(sock, 0x24, payload)
+                )
+                # body[0]=0x5A, [1]=pairing, [2]=status, [3]=count
+                if len(body) < 4:
+                    raise ValueError(f"UMAS read_bits short response ({len(body)} bytes)")
+                if body[2] != 0xFE:
+                    raise ValueError(f"UMAS read_bits status {body[2]:#04x} (expected 0xFE)")
+                count = body[3]
+                if count != len(addrs):
+                    raise ValueError(
+                        f"UMAS read_bits count mismatch (resp {count} != req {len(addrs)})")
+                # Each %M item is 3 bytes: [0x00, 0x00, bit]
+                result: dict[int, bool] = {}
+                p = 4
+                for a in addrs:
+                    group = body[p:p + 3]
+                    if len(group) < 3:
+                        raise ValueError(
+                            f"UMAS read_bits truncated item for %M{a} at offset {p}")
+                    result[a] = bool(group[2] & 1)
+                    p += 3
+                self.is_connected = True
+                return result
+            except Exception as e:
+                logger.error(f"UMAS read_bits{addrs} error: {e}")
+                self.is_connected = False
+                await self._reconnect()
+                return None
+
+    async def read_bit(self, addr: int) -> Optional[bool]:
+        """Read a single %M bit.  Returns bool or None on error."""
+        result = await self.read_bits([addr])
+        if result is None:
+            return None
+        return result.get(addr)
+
     async def write(self, n: int, v: int) -> bool:
         """
         Write a single %MW register.
