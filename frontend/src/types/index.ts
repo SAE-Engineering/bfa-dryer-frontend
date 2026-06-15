@@ -29,6 +29,14 @@ export interface Setpoints {
   product_max: number
 }
 
+export type FaultSeverity = 'critical' | 'fault'
+
+export interface Fault {
+  id: string            // e.g. 'fire_trip' | 'over_temp' | 'scorch'
+  label: string         // human-readable annunciation text
+  severity: FaultSeverity
+}
+
 export type LicenseStatusKind = 'ok' | 'warning' | 'expired' | 'invalid' | 'missing'
 
 export interface License {
@@ -50,6 +58,7 @@ export interface DryerState {
   sim: boolean
   safety_ok: boolean
   fan_proven: boolean
+  faults?: Fault[]     // active PLC fault latches (fire / over-temp / scorch)
   components: Component[]
   temps: Temps
   setpoints: Setpoints

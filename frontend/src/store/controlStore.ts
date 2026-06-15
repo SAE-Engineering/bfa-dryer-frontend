@@ -34,6 +34,7 @@ const DEFAULT_STATE: DryerState = {
   sim: false,
   safety_ok: false,
   fan_proven: false,
+  faults: [],
   components: [],
   temps: DEFAULT_TEMPS,
   setpoints: DEFAULT_SETPOINTS,
