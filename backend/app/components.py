@@ -128,9 +128,11 @@ FAULT_DEFS: dict[int, dict] = {
 # gets the fire-trip (which force-stops the fan).
 # ---------------------------------------------------------------------------
 COMPONENTS: list[Component] = [
-    # Hot fan — plain coil on the final program; %MW44 retained for display only.
-    Component("hot_fan",     "Hot Fan",            "vsd",    True,   0,  0,
-              speed_sp_reg=44, speed_unit="pct", fault_bit=M_FIRE_TRIP),
+    # Hot fan — plain on/off relay (%Q0.0), runs at a fixed speed (10 V hardware
+    # bridge). NOT operator speed-controlled → has_speed=False (on/off tile only,
+    # no speed readout, no set-speed modal).
+    Component("hot_fan",     "Hot Fan",            "vsd",    False,  0,  0,
+              fault_bit=M_FIRE_TRIP),
 
     # Discharge agitator — soft-start run/stop coil, no speed setpoint.
     Component("disch_agi",   "Discharge Agitator", "vsd",    False,  1,  1),
