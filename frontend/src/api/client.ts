@@ -96,4 +96,9 @@ export const api = {
 
   getReleased: () =>
     get<{ released: boolean; connected: boolean }>('/api/plc/released'),
+
+  // SIM-ONLY: engage/clear a simulated E-STOP (safety relay drop). Backend
+  // refuses this unless it's running the in-process simulator.
+  simEstop: (on: boolean) =>
+    post<{ ok: boolean; estop: boolean }>('/api/sim/estop', { on }),
 }

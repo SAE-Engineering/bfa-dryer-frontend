@@ -95,6 +95,9 @@ class Component:
     manual: bool = True                  # False → indicator only (no operator toggle)
     min_hz: float = 0.0                  # HMI minimum speed (drive LSP) — operator
                                          # cannot command below this; 0.0 = no floor
+    speed_res_hz: float = 1.0            # Hz per setpoint-register count. 1.0 = the
+                                         # register is whole-Hz (default contract);
+                                         # 0.1 = tenths (finer steps, e.g. trace chain)
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +141,8 @@ COMPONENTS: list[Component] = [
     Component("spinner",     "Spinner",            "vsd",    True,   2,  2,  speed_sp_reg=40, min_hz=20.0),
     Component("agitator1",   "Agitator 1",         "vsd",    True,   3,  3,  speed_sp_reg=41, min_hz=20.0),
     Component("agitator2",   "Agitator 2",         "vsd",    True,   9,  9,  speed_sp_reg=42, min_hz=20.0),
-    Component("trace_chain", "Trace Chain",        "vsd",    True,  10, 10,  speed_sp_reg=43, min_hz=10.0),
+    Component("trace_chain", "Trace Chain",        "vsd",    True,  10, 10,  speed_sp_reg=43, min_hz=10.0,
+              speed_res_hz=0.1),   # dwell-critical belt → 0.1 Hz fine steps (%MW43 in tenths)
 
     # DOL bank (Q0.4-Q0.8) — no speed.
     Component("mill",        "Mill",               "dol",    False,  4,  4),
@@ -207,13 +211,15 @@ SETPOINT_REG_MAP: dict[str, int] = {
 SPEED_HZ_MAX = 50.0  # nominal drive frequency ceiling (Hz)
 
 
-def speed_pct_to_raw(value_pct: float, unit: str) -> int:
+def speed_pct_to_raw(value_pct: float, unit: str, res_hz: float = 1.0) -> int:
     """Convert an operator 0-100 % speed to the raw %MW value for the setpoint
-    register, honouring the register's unit.  'hz' → 0..SPEED_HZ_MAX Hz integer;
-    'pct' → 0..100 (display-only). Always clamped to a non-negative integer."""
+    register, honouring the register's unit + resolution.  'hz' → Hz scaled by
+    res_hz (1.0 → whole-Hz count; 0.1 → tenths-of-Hz count, e.g. trace chain);
+    'pct' → 0..100 (display-only). Always a non-negative integer."""
     pct = max(0.0, min(100.0, float(value_pct)))
     if unit == "hz":
-        return int(round(pct / 100.0 * SPEED_HZ_MAX))
+        hz = pct / 100.0 * SPEED_HZ_MAX
+        return int(round(hz / res_hz))
     return int(round(pct))
 
 # fan_proven status source: the PLC's hot-fan-on demand bit %M23 (status, NOT the

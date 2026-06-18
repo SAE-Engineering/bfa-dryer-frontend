@@ -24,7 +24,10 @@ import time
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
-from app.components import SP_DEFAULTS, SETPOINT_REG_MAP
+from app.components import (
+    SP_DEFAULTS, SETPOINT_REG_MAP,
+    M_FIRE_TRIP, M_OVER_TEMP, M_SCORCH,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +225,37 @@ class SimulatedPlcClient:
         # _pending[bit] = (target_value, apply_at_monotonic)
         self._pending: dict[int, tuple[bool, float]] = {}
 
+        # SIM-ONLY input injection (driven from the design-page I/O panel):
+        #   _estop          — hardwired safety relay drop: safety clears, all
+        #                      motors stop (power cut), commands clear.
+        #   is_connected    — set False to fake a PLC link loss (comms drop).
+        #   _inject_faults  — fault latches forced on (fire / over-temp / scorch).
+        # None of these exist on the real client.
+        self._estop = False
+        self._inject_faults: set[int] = set()
+
+    # ---- SIM-ONLY input injection ------------------------------------------
+    _FAULT_BITS = {"fire": M_FIRE_TRIP, "over_temp": M_OVER_TEMP, "scorch": M_SCORCH}
+
+    def set_estop(self, on: bool) -> None:
+        self._estop = bool(on)
+
+    def set_commloss(self, on: bool) -> None:
+        # Comms drop ⇒ the link is "down": state builder reports connected=False.
+        self.is_connected = not bool(on)
+
+    def set_fault(self, kind: str, on: bool) -> None:
+        bit = self._FAULT_BITS.get(kind)
+        if bit is None:
+            return
+        if on:
+            self._inject_faults.add(bit)
+        else:
+            self._inject_faults.discard(bit)
+
+    def injected_faults(self) -> set[int]:
+        return set(self._inject_faults)
+
     # ------------------------------------------------------------------
     # Public interface (same signature as ModbusClient)
     # ------------------------------------------------------------------
@@ -287,7 +321,7 @@ class SimulatedPlcClient:
             vsd_cmd_bits = [10, 3, 9, 2]    # trace_chain, ag1, ag2, spinner
             static = {
                 0: True,    1: True,   2: True,   3: False,
-                4: True,    5: False,
+                4: not self._estop,    5: False,   # %M4 SAFETY-OK drops on E-STOP
                 20: False,  21: False, 22: False,
                 23: fan_proven,
             }
@@ -357,27 +391,35 @@ class SimulatedPlcClient:
         dt = now - self._last_tick
         self._last_tick = now
 
-        # Apply any pending running-bit transitions
-        for bit, (target, apply_at) in list(self._pending.items()):
-            if now >= apply_at:
-                word = self._regs[20]
-                if target:
-                    word |= (1 << bit)
-                else:
-                    word &= ~(1 << bit)
-                self._regs[20] = word & 0xFFFF
-                del self._pending[bit]
-
-        # Fan proven (bit 13) = mirrors hot_fan running (bit 0 of %MW20)
-        hot_fan_running = bool(self._regs[20] & 0x01)
-        word20 = self._regs[20]
-        if hot_fan_running:
-            word20 |= (1 << 13)
+        if self._estop:
+            # E-STOP: safety relay dropped → power cut. Stop everything, drop the
+            # safety + fan-proven bits, and clear the command word so nothing
+            # re-runs until the operator restarts after reset.
+            self._regs[0] = 0
+            self._regs[20] = 0          # all running bits + safety(X14) + fan(X13) = 0
+            self._pending.clear()
         else:
-            word20 &= ~(1 << 13)
-        # Safety OK (bit 14) always 1 in sim
-        word20 |= (1 << 14)
-        self._regs[20] = word20 & 0xFFFF
+            # Apply any pending running-bit transitions
+            for bit, (target, apply_at) in list(self._pending.items()):
+                if now >= apply_at:
+                    word = self._regs[20]
+                    if target:
+                        word |= (1 << bit)
+                    else:
+                        word &= ~(1 << bit)
+                    self._regs[20] = word & 0xFFFF
+                    del self._pending[bit]
+
+            # Fan proven (bit 13) = mirrors hot_fan running (bit 0 of %MW20)
+            hot_fan_running = bool(self._regs[20] & 0x01)
+            word20 = self._regs[20]
+            if hot_fan_running:
+                word20 |= (1 << 13)
+            else:
+                word20 &= ~(1 << 13)
+            # Safety OK (bit 14) — engaged unless E-STOP is held
+            word20 |= (1 << 14)
+            self._regs[20] = word20 & 0xFFFF
 
         # Ramp actual speeds toward setpoints
         # Speed setpoint regs: MW1=hot_fan, MW2=trace_chain, MW3=spinner,
@@ -405,8 +447,9 @@ class SimulatedPlcClient:
                 self._regs[act_reg] = int(act - ramp_rate)
 
         # Simulate temperatures
-        burner_on   = bool(self._regs[20] & (1 << 11))
-        hot_fan_cmd = bool(self._regs[0]  & (1 <<  0))
+        burner_on       = bool(self._regs[20] & (1 << 11))
+        hot_fan_running = bool(self._regs[20] & 0x01)   # re-derived: valid whether or not E-STOP held
+        hot_fan_cmd     = bool(self._regs[0]  & (1 <<  0))
 
         # Hot fan motor (MW30): rises when hot_fan running, ambient otherwise
         target_hf = 85.0 if hot_fan_running else 25.0

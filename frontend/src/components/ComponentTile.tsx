@@ -40,16 +40,21 @@ interface SpeedModalProps {
   label: string
   currentHz: number
   minHz: number
+  fine: number    // small step (Hz) — e.g. 0.1 for the trace chain, 1 otherwise
+  coarse: number  // large step (Hz) — e.g. 1 for the trace chain, 5 otherwise
+  decimals: number
   onSave: (hz: number) => void
   onClose: () => void
 }
 
-const SpeedModal = ({ label, currentHz, minHz, onSave, onClose }: SpeedModalProps) => {
+const SpeedModal = ({ label, currentHz, minHz, fine, coarse, decimals, onSave, onClose }: SpeedModalProps) => {
+  const round1 = (v: number) => Math.round(v * 10) / 10           // kill float drift on 0.1 steps
+  const clamp = (v: number) => Math.max(minHz, Math.min(MAX_HZ, v))
   // Never start below the drive's minimum (LSP) — the operator can't go under it.
-  const [value, setValue] = useState(Math.max(minHz, Math.round(currentHz)))
+  const [value, setValue] = useState(() => round1(clamp(currentHz)))
 
   const adjust = (delta: number) => {
-    setValue((prev) => Math.max(minHz, Math.min(MAX_HZ, prev + delta)))
+    setValue((prev) => round1(clamp(prev + delta)))
   }
 
   const handleSave = () => {
@@ -61,14 +66,14 @@ const SpeedModal = ({ label, currentHz, minHz, onSave, onClose }: SpeedModalProp
     <button
       onPointerDown={() => adjust(delta)}
       style={{
-        width: '80px', height: '88px', fontSize: big ? '22px' : '42px', fontWeight: 700,
-        background: '#1f2937', border: '2px solid #374151', borderRadius: '14px',
+        width: '80px', height: '88px', fontSize: '24px', fontWeight: 700,
+        background: big ? '#1b2330' : '#1f2937', border: '2px solid #374151', borderRadius: '14px',
         color: '#f9fafb', cursor: 'pointer', flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         userSelect: 'none', touchAction: 'manipulation',
       }}
     >
-      {delta > 0 ? `+${big ? 5 : ''}` : `${big ? '−5' : '−'}`}
+      {(delta > 0 ? '+' : '−') + Math.abs(delta)}
     </button>
   )
 
@@ -111,20 +116,20 @@ const SpeedModal = ({ label, currentHz, minHz, onSave, onClose }: SpeedModalProp
           </span>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            {stepBtn(-5, true)}
-            {stepBtn(-1, false)}
+            {stepBtn(-coarse, true)}
+            {stepBtn(-fine, false)}
 
             <div style={{
               flex: 1, textAlign: 'center', fontFamily: 'monospace',
               fontSize: '72px', fontWeight: 900, color: '#f9fafb',
               fontVariantNumeric: 'tabular-nums', lineHeight: 1,
             }}>
-              {value.toFixed(1)}
+              {value.toFixed(decimals)}
               <span style={{ fontSize: '32px', color: '#9ca3af', marginLeft: '8px', fontWeight: 700 }}>Hz</span>
             </div>
 
-            {stepBtn(1, false)}
-            {stepBtn(5, true)}
+            {stepBtn(fine, false)}
+            {stepBtn(coarse, true)}
           </div>
         </div>
 
@@ -175,7 +180,11 @@ function deriveState(cmd: boolean, running: boolean, fault: boolean): DrvState {
 
 export const ComponentTile = ({ component, locked = false }: ComponentTileProps) => {
   const setComponentCmd = useControlStore((s) => s.setComponentCmd)
-  const { id, label, has_speed, manual, cmd, running, fault, speed_pct, min_hz = 0 } = component
+  const { id, label, has_speed, manual, cmd, running, fault, speed_pct, min_hz = 0, speed_res_hz = 1 } = component
+  // Fine-resolution drives (e.g. the trace chain, res 0.1 Hz) step in 0.1/1 Hz;
+  // whole-Hz drives step in 1/5 Hz.
+  const fineStep = speed_res_hz < 1 ? 0.1 : 1
+  const coarseStep = speed_res_hz < 1 ? 1 : 5
 
   const [speedModalOpen, setSpeedModalOpen] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -389,6 +398,9 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
           label={label}
           currentHz={hz}
           minHz={min_hz}
+          fine={fineStep}
+          coarse={coarseStep}
+          decimals={1}
           onSave={handleSpeedSave}
           onClose={() => setSpeedModalOpen(false)}
         />

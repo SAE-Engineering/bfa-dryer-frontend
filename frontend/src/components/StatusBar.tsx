@@ -29,8 +29,6 @@ export const StatusBar = () => {
   // Link health — drives the stale/unknown handling across the bar.
   const { stale, linkLost, unknown, ageMs, reason } = useLinkHealth()
   const ageS = Math.floor(ageMs / 1000)
-  const simCommDrop = useControlStore((s) => s.simCommDrop)
-  const setSimCommDrop = useControlStore((s) => s.setSimCommDrop)
 
   // Hidden diagnostics gesture: a ~2 s long-press on the SAE logo opens the
   // diag screen (#diag). The kiosk has no URL bar, so this is the discreet way
@@ -152,7 +150,7 @@ export const StatusBar = () => {
         }}
       >
         <img
-          src="/sae-logo.png"
+          src={`${import.meta.env.BASE_URL || '/'}sae-logo.png`}
           alt="SAE Engineering"
           style={{ height: '48px', width: 'auto', display: 'block' }}
         />
@@ -171,21 +169,9 @@ export const StatusBar = () => {
         </span>
       )}
 
-      {/* SIM-ONLY test control — fake a PLC comms drop so the operator can see
-          the STATE-UNKNOWN overlay + stale handling. Never shown on the panel. */}
-      {dryer.sim && (
-        <button
-          onClick={() => setSimCommDrop(!simCommDrop)}
-          className={`px-3 py-1.5 rounded-lg text-sm font-bold border transition-colors ${
-            simCommDrop
-              ? 'bg-green-700 border-green-500 text-white hover:bg-green-600'
-              : 'bg-red-900/40 border-red-700/60 text-red-300 hover:bg-red-900/70 hover:text-red-100'
-          }`}
-          title="Simulator only — fakes a PLC link loss to test the comms-loss UI"
-        >
-          {simCommDrop ? '⟳ End Comms Test' : '⚠ Test: Comms Drop'}
-        </button>
-      )}
+      {/* Sim inputs (E-STOP, comms loss, faults) are driven from the external
+          I/O panel beside the HMI on the design page — NOT from on-screen
+          buttons — so the HMI itself stays identical to the real panel. */}
 
       {/* Live frame age — proves data is fresh; ticks up if the feed stalls */}
       <span

@@ -224,7 +224,8 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
         if comp.has_speed and comp.speed_sp_reg is not None:
             raw = speed_raw.get(comp.speed_sp_reg, 0)
             if comp.speed_unit == "hz":
-                speed_pct = round(min(100.0, raw / 50.0 * 100.0), 1)  # 0-50 Hz → %
+                hz = raw * comp.speed_res_hz                          # res 1.0=whole-Hz, 0.1=tenths
+                speed_pct = round(min(100.0, hz / 50.0 * 100.0), 1)   # Hz → %
             else:
                 speed_pct = round(min(100.0, float(raw)), 1)          # already %
         components.append({
@@ -236,8 +237,9 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
             "cmd":       cmd,
             "running":   running,
             "fault":     fault,
-            "speed_pct": speed_pct,
-            "min_hz":    comp.min_hz,
+            "speed_pct":    speed_pct,
+            "min_hz":       comp.min_hz,
+            "speed_res_hz": comp.speed_res_hz,
         })
 
     temps = {
@@ -334,6 +336,11 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
         M_OVER_TEMP: any(temps[k] >= 98.0  for k in ("burner", "product1", "product2", "exhaust")),
         M_SCORCH:    any(temps[k] >= 92.0  for k in ("product1", "product2")),
     }
+    # OR in any operator-injected fault latches (sim I/O panel inputs)
+    if hasattr(client, "injected_faults"):
+        for bit in client.injected_faults():
+            if bit in sim_faults:
+                sim_faults[bit] = True
     faults = _faults_from_m_bits(sim_faults)
 
     # Build component list
@@ -347,7 +354,8 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
         if comp.has_speed and comp.speed_sp_reg is not None:
             raw = speed_sp.get(comp.speed_sp_reg, 0)
             if comp.speed_unit == "hz":
-                speed_pct = round(min(100.0, raw / 50.0 * 100.0), 1)  # 0-50 Hz -> %
+                hz = raw * comp.speed_res_hz                          # res 1.0=whole-Hz, 0.1=tenths
+                speed_pct = round(min(100.0, hz / 50.0 * 100.0), 1)   # Hz → %
             else:
                 speed_pct = round(min(100.0, float(raw)), 1)          # already %
 
@@ -360,8 +368,9 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
             "cmd":       cmd,
             "running":   running,
             "fault":     fault,
-            "speed_pct": speed_pct,
-            "min_hz":    comp.min_hz,
+            "speed_pct":    speed_pct,
+            "min_hz":       comp.min_hz,
+            "speed_res_hz": comp.speed_res_hz,
         })
 
     # Read operator setpoint registers

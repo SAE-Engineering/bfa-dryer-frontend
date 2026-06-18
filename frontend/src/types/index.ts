@@ -14,6 +14,7 @@ export interface Component {
   fault: boolean
   speed_pct: number   // 0.0–100.0; valid only when has_speed === true
   min_hz?: number     // drive minimum speed (LSP) in Hz; HMI won't command below it
+  speed_res_hz?: number // setpoint resolution in Hz (1 = whole-Hz, 0.1 = fine steps)
 }
 
 export interface Temps {

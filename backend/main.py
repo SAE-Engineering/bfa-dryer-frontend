@@ -155,6 +155,10 @@ class PinRequest(BaseModel):
     pin: str
 
 
+class EstopRequest(BaseModel):
+    on: bool
+
+
 # ---------------------------------------------------------------------------
 # REST endpoints
 # ---------------------------------------------------------------------------
@@ -212,11 +216,12 @@ async def set_speed(req: SpeedRequest):
     # Scale the operator 0-100 % to the register's unit.  The FINAL PLC reads the
     # drive speed words %MW40-43 as Hz (0-50), so a 'hz' setpoint maps 0-100 % →
     # 0-50 Hz; the hot-fan %MW44 ('pct', display-only) stays 0-100.
-    raw = speed_pct_to_raw(req.value_pct, comp.speed_unit)
+    raw = speed_pct_to_raw(req.value_pct, comp.speed_unit, comp.speed_res_hz)
     # Enforce the drive's minimum speed (LSP) as a hard floor — defence in depth
     # behind the HMI clamp, so even a direct API call can't command below it.
+    # min_hz is in Hz; scale to register counts by the drive's resolution.
     if comp.speed_unit == "hz" and comp.min_hz > 0:
-        raw = max(raw, int(round(comp.min_hz)))
+        raw = max(raw, int(round(comp.min_hz / comp.speed_res_hz)))
     ok = await plc_client.write_register(comp.speed_sp_reg, raw)
     if not ok:
         raise HTTPException(status_code=502, detail="PLC write failed")
@@ -261,6 +266,42 @@ async def set_operator_setpoint(req: SetpointRequest):
 
     persistence.save_reg(reg, raw)                 # survive restart / power cycle
     return {"ok": True, "key": req.key, "value_c": round(raw / 10.0, 1), "raw": raw}
+
+
+def _require_sim(attr: str):
+    if not settings.PLC_SIM or not hasattr(plc_client, attr):
+        raise HTTPException(status_code=400, detail="Input simulation is sim-only")
+
+
+@app.post("/api/sim/estop")
+async def sim_estop(req: EstopRequest):
+    """SIM-ONLY: engage/clear a simulated E-STOP (hardwired safety relay drop).
+    Drops the safety-OK bit and stops every motor (power cut). Refused unless the
+    backend is running the in-process simulator — never touches a real PLC."""
+    _require_sim("set_estop")
+    plc_client.set_estop(req.on)
+    return {"ok": True, "estop": req.on}
+
+
+@app.post("/api/sim/commloss")
+async def sim_commloss(req: EstopRequest):
+    """SIM-ONLY: fake a PLC link loss (state reports connected=false)."""
+    _require_sim("set_commloss")
+    plc_client.set_commloss(req.on)
+    return {"ok": True, "commloss": req.on}
+
+
+class SimFaultRequest(BaseModel):
+    kind: str   # 'fire' | 'over_temp' | 'scorch'
+    on: bool
+
+
+@app.post("/api/sim/fault")
+async def sim_fault(req: SimFaultRequest):
+    """SIM-ONLY: force a fault latch on/off (fire / over-temp / scorch)."""
+    _require_sim("set_fault")
+    plc_client.set_fault(req.kind, req.on)
+    return {"ok": True, "kind": req.kind, "on": req.on}
 
 
 # ---------------------------------------------------------------------------
