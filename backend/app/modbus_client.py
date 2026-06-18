@@ -233,12 +233,38 @@ class SimulatedPlcClient:
         # None of these exist on the real client.
         self._estop = False
         self._inject_faults: set[int] = set()
+        self._main_off = False    # main switch OFF (%I0.0 low): master kill — all
+                                  # outputs off AND the HMI screen powers down.
+        self._softlock = False    # soft-lockout (%I0.10 low): forces the %M0-gated
+                                  # outputs off (burner + DOL bank + disch agitator).
 
     # ---- SIM-ONLY input injection ------------------------------------------
     _FAULT_BITS = {"fire": M_FIRE_TRIP, "over_temp": M_OVER_TEMP, "scorch": M_SCORCH}
+    # %MW20 status bits forced off by soft-lockout (= outputs gated on %M0):
+    #   disch_agi(1), mill(4), disch_conv(5), load_conv(6), brush(7), shaker(8), burner(11)
+    _M0_GATED_MASK = (1 << 1) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 8) | (1 << 11)
 
     def set_estop(self, on: bool) -> None:
         self._estop = bool(on)
+
+    def set_main(self, on: bool) -> None:
+        # Main switch ON = machine powered; OFF = master kill (+ HMI screen off).
+        self._main_off = not bool(on)
+
+    def set_softlock(self, on: bool) -> None:
+        self._softlock = bool(on)
+
+    def reset(self) -> None:
+        # Reset pushbutton — clears the injected fault latches.
+        self._inject_faults.clear()
+
+    @property
+    def main_on(self) -> bool:
+        return not self._main_off
+
+    @property
+    def soft_lock(self) -> bool:
+        return self._softlock
 
     def set_commloss(self, on: bool) -> None:
         # Comms drop ⇒ the link is "down": state builder reports connected=False.
@@ -391,10 +417,11 @@ class SimulatedPlcClient:
         dt = now - self._last_tick
         self._last_tick = now
 
-        if self._estop:
-            # E-STOP: safety relay dropped → power cut. Stop everything, drop the
-            # safety + fan-proven bits, and clear the command word so nothing
-            # re-runs until the operator restarts after reset.
+        if self._estop or self._main_off:
+            # E-STOP (safety relay drop) OR MAIN SWITCH OFF (%I0.0 low) — master
+            # kill. Stop everything, drop the safety + fan-proven bits, clear the
+            # command word. Main-off additionally powers the HMI screen down (the
+            # state reports main_on=false; the SPA renders a dark screen).
             self._regs[0] = 0
             self._regs[20] = 0          # all running bits + safety(X14) + fan(X13) = 0
             self._pending.clear()
@@ -419,6 +446,10 @@ class SimulatedPlcClient:
                 word20 &= ~(1 << 13)
             # Safety OK (bit 14) — engaged unless E-STOP is held
             word20 |= (1 << 14)
+            # Soft-lockout (%I0.10 low): force the %M0-gated outputs OFF (burner +
+            # DOL bank + discharge agitator). VSDs run on their own permits → unaffected.
+            if self._softlock:
+                word20 &= ~self._M0_GATED_MASK
             self._regs[20] = word20 & 0xFFFF
 
         # Ramp actual speeds toward setpoints

@@ -5,6 +5,7 @@ import { FaultBanner } from "./components/FaultBanner"
 import { LicenseBanner } from "./components/LicenseBanner"
 import { Dashboard } from "./components/Dashboard"
 import { CommLossOverlay } from "./components/CommLossOverlay"
+import { PoweredOffOverlay } from "./components/PoweredOffOverlay"
 import { DiagScreen } from "./components/DiagScreen"
 import { DiagPinGate } from "./components/DiagPinGate"
 
@@ -54,6 +55,8 @@ function App() {
       </main>
       {/* Full-screen STATE-UNKNOWN overlay on PLC link loss (renders above all) */}
       <CommLossOverlay />
+      {/* Black "screen off" when the main switch is off (above everything) */}
+      <PoweredOffOverlay />
     </div>
   )
 }

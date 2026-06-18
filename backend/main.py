@@ -304,6 +304,32 @@ async def sim_fault(req: SimFaultRequest):
     return {"ok": True, "kind": req.kind, "on": req.on}
 
 
+@app.post("/api/sim/main")
+async def sim_main(req: EstopRequest):
+    """SIM-ONLY: main switch (%I0.0). on=true → machine powered; on=false →
+    master kill: every output off and the HMI screen powers down (main_on=false)."""
+    _require_sim("set_main")
+    plc_client.set_main(req.on)
+    return {"ok": True, "main_on": req.on}
+
+
+@app.post("/api/sim/softlock")
+async def sim_softlock(req: EstopRequest):
+    """SIM-ONLY: soft-lockout (%I0.10). on=true → forces the %M0-gated outputs
+    (burner + DOL bank + discharge agitator) off."""
+    _require_sim("set_softlock")
+    plc_client.set_softlock(req.on)
+    return {"ok": True, "soft_lock": req.on}
+
+
+@app.post("/api/sim/reset")
+async def sim_reset():
+    """SIM-ONLY: reset pushbutton (%I0.12) — clears the injected fault latches."""
+    _require_sim("reset")
+    plc_client.reset()
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # PLC release / take — PIN-gated maintenance release of the HMI's PLC link so
 # Schneider MEB (single UMAS master) can take the PLC for a program upload.

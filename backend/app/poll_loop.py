@@ -388,6 +388,8 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
         "type":       "state",
         "ts":         datetime.now(timezone.utc).isoformat(),
         "connected":  client.is_connected,
+        "main_on":    getattr(client, "main_on", True),     # main switch (sim input)
+        "soft_lock":  getattr(client, "soft_lock", False),  # soft-lockout (sim input)
         "released":   plc_gate.is_released(),
         "sim":        settings.PLC_SIM,
         "safety_ok":  safety_ok,

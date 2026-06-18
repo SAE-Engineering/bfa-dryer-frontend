@@ -57,6 +57,8 @@ export interface DryerState {
   ts: string
   connected: boolean
   released?: boolean   // true → HMI link dropped for MEB (PLC still running)
+  main_on?: boolean    // main switch (%I0.0): false → panel powered down (screen dark)
+  soft_lock?: boolean  // soft-lockout (%I0.10): %M0-gated outputs forced off
   sim: boolean
   safety_ok: boolean
   fan_proven: boolean
