@@ -231,7 +231,9 @@ class SimulatedPlcClient:
         #   is_connected    — set False to fake a PLC link loss (comms drop).
         #   _inject_faults  — fault latches forced on (fire / over-temp / scorch).
         # None of these exist on the real client.
-        self._estop = False
+        self._estop = False       # e-stop input (momentary engage)
+        self._estop_latch = False # LATCHED e-stop: set on engage, cleared ONLY by
+                                  # the reset button. Drives the HMI warning triangle.
         self._inject_faults: set[int] = set()
         self._main_off = False    # main switch OFF (%I0.0 low): master kill — all
                                   # outputs off AND the HMI screen powers down.
@@ -245,7 +247,11 @@ class SimulatedPlcClient:
     _M0_GATED_MASK = (1 << 1) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 8) | (1 << 11)
 
     def set_estop(self, on: bool) -> None:
+        # Engaging the e-stop LATCHES it; releasing the input alone does NOT clear
+        # the latch — only the reset button does.
         self._estop = bool(on)
+        if on:
+            self._estop_latch = True
 
     def set_main(self, on: bool) -> None:
         # Main switch ON = machine powered; OFF = master kill (+ HMI screen off).
@@ -255,7 +261,9 @@ class SimulatedPlcClient:
         self._softlock = bool(on)
 
     def reset(self) -> None:
-        # Reset pushbutton — clears the injected fault latches.
+        # Reset pushbutton — clears the latched e-stop and the fault latches.
+        # If the e-stop input is still engaged it re-latches on the next tick.
+        self._estop_latch = False
         self._inject_faults.clear()
 
     @property
@@ -265,6 +273,10 @@ class SimulatedPlcClient:
     @property
     def soft_lock(self) -> bool:
         return self._softlock
+
+    @property
+    def estop_latched(self) -> bool:
+        return self._estop_latch
 
     def set_commloss(self, on: bool) -> None:
         # Comms drop ⇒ the link is "down": state builder reports connected=False.
@@ -347,7 +359,7 @@ class SimulatedPlcClient:
             vsd_cmd_bits = [10, 3, 9, 2]    # trace_chain, ag1, ag2, spinner
             static = {
                 0: True,    1: True,   2: True,   3: False,
-                4: not self._estop,    5: False,   # %M4 SAFETY-OK drops on E-STOP
+                4: not self._estop_latch,    5: False,   # %M4 SAFETY-OK drops while e-stop latched
                 20: False,  21: False, 22: False,
                 23: fan_proven,
             }
@@ -417,11 +429,14 @@ class SimulatedPlcClient:
         dt = now - self._last_tick
         self._last_tick = now
 
-        if self._estop or self._main_off:
-            # E-STOP (safety relay drop) OR MAIN SWITCH OFF (%I0.0 low) — master
-            # kill. Stop everything, drop the safety + fan-proven bits, clear the
-            # command word. Main-off additionally powers the HMI screen down (the
-            # state reports main_on=false; the SPA renders a dark screen).
+        if self._estop:
+            self._estop_latch = True    # input held → keep the latch set
+
+        if self._estop_latch or self._main_off:
+            # LATCHED E-STOP (cleared only by reset) OR MAIN SWITCH OFF (%I0.0 low)
+            # — master kill. Stop everything, drop the safety + fan-proven bits,
+            # clear the command word. Main-off additionally powers the HMI screen
+            # down (state reports main_on=false; the SPA renders a dark screen).
             self._regs[0] = 0
             self._regs[20] = 0          # all running bits + safety(X14) + fan(X13) = 0
             self._pending.clear()
