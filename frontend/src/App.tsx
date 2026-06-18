@@ -4,6 +4,7 @@ import { StatusBar } from "./components/StatusBar"
 import { FaultBanner } from "./components/FaultBanner"
 import { LicenseBanner } from "./components/LicenseBanner"
 import { Dashboard } from "./components/Dashboard"
+import { CommLossOverlay } from "./components/CommLossOverlay"
 import { DiagScreen } from "./components/DiagScreen"
 import { DiagPinGate } from "./components/DiagPinGate"
 
@@ -51,6 +52,8 @@ function App() {
       <main className="flex-1 min-h-0 overflow-hidden">
         <Dashboard />
       </main>
+      {/* Full-screen STATE-UNKNOWN overlay on PLC link loss (renders above all) */}
+      <CommLossOverlay />
     </div>
   )
 }

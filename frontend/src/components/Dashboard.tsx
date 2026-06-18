@@ -63,12 +63,16 @@ export const Dashboard = () => {
         <div className="shrink-0 flex" style={{ gap: '4px', padding: '3px', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.07)', width: 'fit-content' }}>
           {PAGES.map((p) => {
             const on = p.key === active
-            const count = pick(dryer.components, p.ids).filter((c) => c.running).length
+            const pageComps = pick(dryer.components, p.ids)
+            const count = pageComps.filter((c) => c.running).length
+            // Cross-tab fault annunciation (critic #4): faults on an inactive
+            // page are otherwise invisible. Show a red count badge on the tab.
+            const faultCount = pageComps.filter((c) => c.fault).length
             return (
               <button
                 key={p.key}
                 onClick={() => setActive(p.key)}
-                className={`transition-all select-none touch-none font-semibold ${
+                className={`relative transition-all select-none touch-none font-semibold ${
                   on
                     ? 'bg-gray-700 text-gray-100 shadow-sm'
                     : 'text-gray-400 hover:text-gray-200'
@@ -77,7 +81,9 @@ export const Dashboard = () => {
                   fontSize: '32px',
                   padding: '18px 56px',
                   borderRadius: '12px',
-                  border: on ? '1px solid rgba(255,255,255,0.12)' : '1px solid transparent',
+                  border: faultCount > 0
+                    ? '2px solid #ef4444'
+                    : on ? '1px solid rgba(255,255,255,0.12)' : '1px solid transparent',
                   minHeight: '88px',
                   letterSpacing: '0.02em',
                 }}
@@ -90,6 +96,15 @@ export const Dashboard = () => {
                     style={{ fontSize: '24px' }}
                   >
                     {count}
+                  </span>
+                )}
+                {faultCount > 0 && (
+                  <span
+                    className="absolute -top-2 -right-2 flex items-center justify-center rounded-full bg-red-600 text-white font-black animate-pulse shadow-lg"
+                    style={{ minWidth: '34px', height: '34px', padding: '0 8px', fontSize: '20px', border: '2px solid #fecaca' }}
+                    title={`${faultCount} fault${faultCount > 1 ? 's' : ''} on this page`}
+                  >
+                    ⚠{faultCount}
                   </span>
                 )}
               </button>

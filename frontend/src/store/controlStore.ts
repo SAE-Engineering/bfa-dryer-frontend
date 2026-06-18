@@ -44,18 +44,36 @@ const DEFAULT_STATE: DryerState = {
 interface StoreState {
   dryer: DryerState
   wsStatus: 'connecting' | 'open' | 'closed'
+  // Epoch ms when the last *fresh* state frame was applied. Drives staleness
+  // detection (frame age). 0 until the first frame lands.
+  lastUpdate: number
+  // SIM-ONLY: when true, incoming frames are dropped (feed frozen) and the UI
+  // treats the PLC link as lost — lets the operator demo the comms-loss /
+  // staleness handling on the bosun sim. Never set on the real panel.
+  simCommDrop: boolean
   // Set the entire state from a WS message or REST snapshot
   setDryerState: (state: DryerState) => void
   setWsStatus: (s: 'connecting' | 'open' | 'closed') => void
   // Optimistic update: flip cmd on a single component
   setComponentCmd: (id: string, on: boolean) => void
+  // SIM-ONLY comms-drop test toggle
+  setSimCommDrop: (on: boolean) => void
 }
 
 export const useControlStore = create<StoreState>((set) => ({
   dryer: DEFAULT_STATE,
   wsStatus: 'connecting',
+  lastUpdate: 0,
+  simCommDrop: false,
 
-  setDryerState: (state) => set({ dryer: state }),
+  setDryerState: (state) =>
+    set((prev) => {
+      // SIM comms-drop test: ignore fresh frames so the frame age climbs and the
+      // comms-loss overlay / staleness UI engages exactly as it would on a real
+      // PLC link loss. Releasing the toggle lets the next frame back in.
+      if (prev.simCommDrop) return {}
+      return { dryer: state, lastUpdate: Date.now() }
+    }),
 
   setWsStatus: (s) => set({ wsStatus: s }),
 
@@ -68,4 +86,6 @@ export const useControlStore = create<StoreState>((set) => ({
         ),
       },
     })),
+
+  setSimCommDrop: (on) => set({ simCommDrop: on }),
 }))

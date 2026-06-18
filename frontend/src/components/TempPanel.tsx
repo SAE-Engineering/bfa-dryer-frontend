@@ -6,6 +6,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { Temps, Setpoints } from '../types'
 import { api } from '../api/client'
+import { useLinkHealth } from '../hooks/useLinkHealth'
 
 // ─── Setpoint Modal ──────────────────────────────────────────────────────────
 
@@ -266,11 +267,12 @@ interface TempCardProps {
   value: number
   modalKind: ModalKind
   onLongPress: () => void
+  unknown?: boolean
 }
 
 const LONG_PRESS_MS = 550
 
-const TempCard = ({ label, value, modalKind, onLongPress }: TempCardProps) => {
+const TempCard = ({ label, value, modalKind, onLongPress, unknown = false }: TempCardProps) => {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const firedRef = useRef(false)
 
@@ -280,7 +282,15 @@ const TempCard = ({ label, value, modalKind, onLongPress }: TempCardProps) => {
   let valueColor = '#f9fafb'
   let unitColor = '#9ca3af'
 
-  if (value > 150) {
+  if (unknown) {
+    // State is stale / link lost — the reading is NOT trustworthy. Show neutral
+    // grey and a "—" instead of a stale number that looks live (critic #1/#3).
+    borderColor = '#4b5563'
+    bgColor = '#0d1117'
+    labelColor = '#6b7280'
+    valueColor = '#6b7280'
+    unitColor = '#4b5563'
+  } else if (value > 150) {
     borderColor = '#dc2626'
     bgColor = '#1a0505'
     labelColor = '#fca5a5'
@@ -369,7 +379,7 @@ const TempCard = ({ label, value, modalKind, onLongPress }: TempCardProps) => {
           color: valueColor,
           fontVariantNumeric: 'tabular-nums',
         }}>
-          {value.toFixed(1)}
+          {unknown ? '—' : value.toFixed(1)}
         </span>
         <span style={{
           fontWeight: 700,
@@ -394,6 +404,7 @@ type OpenModal = { kind: 'burner' } | { kind: 'product' } | { kind: 'exhaust' } 
 
 export const TempPanel = ({ temps, setpoints }: TempPanelProps) => {
   const [openModal, setOpenModal] = useState<OpenModal>(null)
+  const { unknown } = useLinkHealth()
 
   const handleSave = useCallback(
     async (updates: Record<string, number>) => {
@@ -436,24 +447,28 @@ export const TempPanel = ({ temps, setpoints }: TempPanelProps) => {
             label="Burner"
             value={temps.burner}
             modalKind="burner"
+            unknown={unknown}
             onLongPress={() => setOpenModal({ kind: 'burner' })}
           />
           <TempCard
             label="Product 1"
             value={temps.product1}
             modalKind="product"
+            unknown={unknown}
             onLongPress={() => setOpenModal({ kind: 'product' })}
           />
           <TempCard
             label="Product 2"
             value={temps.product2}
             modalKind="product"
+            unknown={unknown}
             onLongPress={() => setOpenModal({ kind: 'product' })}
           />
           <TempCard
             label="Exhaust"
             value={temps.exhaust}
             modalKind="exhaust"
+            unknown={unknown}
             onLongPress={() => setOpenModal({ kind: 'exhaust' })}
           />
         </div>

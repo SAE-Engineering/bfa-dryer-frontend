@@ -7,6 +7,7 @@ import { useControlStore } from '../store/controlStore'
 import { VsdNameplates } from './VsdNameplates'
 import { VsdPrograms } from './VsdPrograms'
 import { api } from '../api/client'
+import { useLinkHealth } from '../hooks/useLinkHealth'
 
 function useClock() {
   const [time, setTime] = useState(() => new Date().toLocaleTimeString('en-AU', { hour12: false }))
@@ -25,6 +26,12 @@ export const StatusBar = () => {
   const wsStatus = useControlStore((s) => s.wsStatus)
   const clock = useClock()
 
+  // Link health — drives the stale/unknown handling across the bar.
+  const { stale, linkLost, unknown, ageMs, reason } = useLinkHealth()
+  const ageS = Math.floor(ageMs / 1000)
+  const simCommDrop = useControlStore((s) => s.simCommDrop)
+  const setSimCommDrop = useControlStore((s) => s.setSimCommDrop)
+
   // Hidden diagnostics gesture: a ~2 s long-press on the SAE logo opens the
   // diag screen (#diag). The kiosk has no URL bar, so this is the discreet way
   // in. Pointer-based so it works on the touch panel and with a mouse.
@@ -42,30 +49,43 @@ export const StatusBar = () => {
     }
   }
 
-  const connLabel =
-    wsStatus === 'open'
-      ? dryer.connected
-        ? 'PLC Connected'
-        : 'PLC Offline'
-      : wsStatus === 'connecting'
-      ? 'Connecting…'
+  const connLabel = linkLost
+    ? reason === 'sim_drop'
+      ? 'COMMS DROP (TEST)'
+      : reason === 'plc_offline'
+      ? 'PLC Offline'
       : 'Disconnected'
+    : stale
+    ? `DATA STALE ${ageS}s`
+    : wsStatus === 'open'
+    ? dryer.connected
+      ? 'PLC Connected'
+      : 'PLC Offline'
+    : wsStatus === 'connecting'
+    ? 'Connecting…'
+    : 'Disconnected'
 
-  const connDot =
-    wsStatus === 'open' && dryer.connected
-      ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]'
-      : wsStatus === 'connecting'
-      ? 'bg-yellow-400 animate-pulse'
-      : 'bg-red-500 animate-pulse'
+  const connDot = linkLost
+    ? 'bg-red-500 animate-pulse'
+    : stale
+    ? 'bg-amber-400 animate-pulse'
+    : wsStatus === 'open' && dryer.connected
+    ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]'
+    : wsStatus === 'connecting'
+    ? 'bg-yellow-400 animate-pulse'
+    : 'bg-red-500 animate-pulse'
 
-  const connText =
-    wsStatus === 'open' && dryer.connected
-      ? 'text-green-300'
-      : wsStatus === 'connecting'
-      ? 'text-yellow-300'
-      : 'text-red-400'
+  const connText = linkLost
+    ? 'text-red-400'
+    : stale
+    ? 'text-amber-300'
+    : wsStatus === 'open' && dryer.connected
+    ? 'text-green-300'
+    : wsStatus === 'connecting'
+    ? 'text-yellow-300'
+    : 'text-red-400'
 
-  const loggingActive = wsStatus === 'open' && dryer.connected
+  const loggingActive = wsStatus === 'open' && dryer.connected && !unknown
 
   const [showNameplates, setShowNameplates] = useState(false)
   const [showPrograms, setShowPrograms] = useState(false)
@@ -151,6 +171,32 @@ export const StatusBar = () => {
         </span>
       )}
 
+      {/* SIM-ONLY test control — fake a PLC comms drop so the operator can see
+          the STATE-UNKNOWN overlay + stale handling. Never shown on the panel. */}
+      {dryer.sim && (
+        <button
+          onClick={() => setSimCommDrop(!simCommDrop)}
+          className={`px-3 py-1.5 rounded-lg text-sm font-bold border transition-colors ${
+            simCommDrop
+              ? 'bg-green-700 border-green-500 text-white hover:bg-green-600'
+              : 'bg-red-900/40 border-red-700/60 text-red-300 hover:bg-red-900/70 hover:text-red-100'
+          }`}
+          title="Simulator only — fakes a PLC link loss to test the comms-loss UI"
+        >
+          {simCommDrop ? '⟳ End Comms Test' : '⚠ Test: Comms Drop'}
+        </button>
+      )}
+
+      {/* Live frame age — proves data is fresh; ticks up if the feed stalls */}
+      <span
+        className={`font-mono text-sm tabular-nums ${
+          unknown ? 'text-amber-300 font-bold' : 'text-gray-600'
+        }`}
+        title="Age of the last state frame received"
+      >
+        {ageS}s
+      </span>
+
       <div className="flex-1" />
 
       {/* VSD reference buttons */}
@@ -170,42 +216,46 @@ export const StatusBar = () => {
       {/* Divider */}
       <span className="text-gray-600 text-2xl font-thin">|</span>
 
-      {/* Safety OK */}
+      {/* Safety OK — drops to "unknown" when state is stale / link lost */}
       <div className="flex items-center gap-2.5">
         <span
           className={`inline-block w-4 h-4 rounded-full shrink-0 ${
-            dryer.safety_ok
+            unknown
+              ? 'bg-gray-500'
+              : dryer.safety_ok
               ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]'
               : 'bg-red-500 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.9)]'
           }`}
         />
         <span
           className={`font-bold text-lg leading-none ${
-            dryer.safety_ok ? 'text-green-300' : 'text-red-400'
+            unknown ? 'text-gray-400' : dryer.safety_ok ? 'text-green-300' : 'text-red-400'
           }`}
         >
-          {dryer.safety_ok ? 'Safety OK' : 'SAFETY FAULT'}
+          {unknown ? 'Safety ?' : dryer.safety_ok ? 'Safety OK' : 'SAFETY FAULT'}
         </span>
       </div>
 
       {/* Divider */}
       <span className="text-gray-600 text-2xl font-thin">|</span>
 
-      {/* Fan proven */}
+      {/* Fan proven — "unknown" when state is stale / link lost */}
       <div className="flex items-center gap-2.5">
         <span
           className={`inline-block w-4 h-4 rounded-full shrink-0 ${
-            dryer.fan_proven
+            unknown
+              ? 'bg-gray-500'
+              : dryer.fan_proven
               ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]'
               : 'bg-gray-600'
           }`}
         />
         <span
           className={`font-semibold text-lg leading-none ${
-            dryer.fan_proven ? 'text-green-300' : 'text-gray-500'
+            unknown ? 'text-gray-400' : dryer.fan_proven ? 'text-green-300' : 'text-gray-500'
           }`}
         >
-          Fan Proven
+          {unknown ? 'Fan ?' : 'Fan Proven'}
         </span>
       </div>
 

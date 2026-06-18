@@ -300,6 +300,13 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
         for i, val in enumerate(speed_regs):
             speed_actuals[REG_SPEED_ACT_BASE + i] = val
 
+    # Commanded drive Hz setpoints %MW40-44 (what the HMI actually writes).
+    # The legacy actual-speed ramp keys off %MW1-6, which the current HMI never
+    # writes, so report the COMMANDED Hz here — identical to the live UMAS path —
+    # so the simulator shows real speeds in Hz instead of a frozen 0.
+    sp_speed_regs = await client.read_holding_registers(40, 5)
+    speed_sp = {40 + i: v for i, v in enumerate(sp_speed_regs)} if sp_speed_regs else {}
+
     # Temperatures: %MW30..%MW34 (5 registers)
     temp_regs_raw = await client.read_holding_registers(REG_TEMP_BASE, 5)
     temps_raw: dict[int, int] = {}
@@ -336,9 +343,12 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
         fault   = bool(comp.fault_bit is not None and sim_faults.get(comp.fault_bit))
 
         speed_pct = 0.0
-        if comp.has_speed and comp.speed_act_reg is not None:
-            raw = speed_actuals.get(comp.speed_act_reg, 0)
-            speed_pct = round(raw / 100.0, 2)
+        if comp.has_speed and comp.speed_sp_reg is not None:
+            raw = speed_sp.get(comp.speed_sp_reg, 0)
+            if comp.speed_unit == "hz":
+                speed_pct = round(min(100.0, raw / 50.0 * 100.0), 1)  # 0-50 Hz -> %
+            else:
+                speed_pct = round(min(100.0, float(raw)), 1)          # already %
 
         components.append({
             "id":        comp.id,
