@@ -34,12 +34,6 @@ const MAX_HZ = 50
 const pctToHz = (pct: number) => (pct * MAX_HZ) / 100
 const hzToPct = (hz: number) => (hz / MAX_HZ) * 100
 
-// High-consequence STARTS that require a two-step confirm (critic #6).
-// The burner itself is automatic/indicator-only, so the heat-chain proxy is the
-// Hot Fan (running it is what lets the burner fire); the mill and conveyors can
-// drag/crush, so they confirm too.
-const CONFIRM_START_IDS = new Set(['hot_fan', 'mill', 'disch_conv', 'load_conv'])
-
 // ─── Speed Modal (Hz) ──────────────────────────────────────────────────────
 
 interface SpeedModalProps {
@@ -155,72 +149,19 @@ const SpeedModal = ({ label, currentHz, onSave, onClose }: SpeedModalProps) => {
   )
 }
 
-// ─── Confirm-start Modal ─────────────────────────────────────────────────────
-
-const ConfirmStartModal = ({ label, onConfirm, onClose }: {
-  label: string; onConfirm: () => void; onClose: () => void
-}) => (
-  <div
-    onClick={onClose}
-    style={{
-      position: 'fixed', inset: 0, zIndex: 210, background: 'rgba(0,0,0,0.74)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }}
-  >
-    <div
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        background: '#111827', border: '2px solid #b45309', borderRadius: '18px',
-        padding: '34px 40px', minWidth: '520px', maxWidth: '90vw', textAlign: 'center',
-        display: 'flex', flexDirection: 'column', gap: '26px',
-        boxShadow: '0 24px 60px rgba(0,0,0,0.8)',
-      }}
-    >
-      <div style={{ fontSize: '30px', fontWeight: 800, color: '#fcd34d', letterSpacing: '0.02em' }}>
-        Start {label}?
-      </div>
-      <div style={{ fontSize: '19px', color: '#d1d5db', lineHeight: 1.4 }}>
-        This starts equipment with mechanical / heat consequences. Confirm you
-        intend to start it.
-      </div>
-      <div style={{ display: 'flex', gap: '16px' }}>
-        <button
-          onClick={() => { onConfirm(); onClose() }}
-          style={{
-            flex: 1, height: '78px', fontSize: '24px', fontWeight: 800,
-            letterSpacing: '0.05em', textTransform: 'uppercase',
-            background: '#7c2d12', border: '2px solid #ea580c', borderRadius: '12px',
-            color: '#fed7aa', cursor: 'pointer', touchAction: 'manipulation',
-          }}
-        >
-          ▶ Start
-        </button>
-        <button
-          onClick={onClose}
-          style={{
-            flex: 1, height: '78px', fontSize: '24px', fontWeight: 800,
-            letterSpacing: '0.05em', textTransform: 'uppercase',
-            background: '#1f2937', border: '2px solid #374151', borderRadius: '12px',
-            color: '#9ca3af', cursor: 'pointer', touchAction: 'manipulation',
-          }}
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  </div>
-)
-
 // ─── Tile ─────────────────────────────────────────────────────────────────────
 
 const LONG_PRESS_MS = 500
 
-// Derived single state for a component — commanded ≠ running disambiguated.
-type DrvState = 'off' | 'commanded' | 'running' | 'faulted'
+// Derived single state for a component — commanded ≠ running disambiguated, and
+// the "commanded-off but still spinning" window gets its own STOPPING state so a
+// stop tap gives instant feedback (and a second tap can't restart it).
+type DrvState = 'off' | 'commanded' | 'running' | 'stopping' | 'faulted'
 function deriveState(cmd: boolean, running: boolean, fault: boolean): DrvState {
   if (fault) return 'faulted'
-  if (running) return 'running'
-  if (cmd) return 'commanded'
+  if (cmd && running) return 'running'
+  if (cmd) return 'commanded'      // commanded on, not yet running → STARTING…
+  if (running) return 'stopping'   // commanded off, still spinning → STOPPING…
   return 'off'
 }
 
@@ -229,7 +170,6 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
   const { id, label, has_speed, manual, cmd, running, fault, speed_pct } = component
 
   const [speedModalOpen, setSpeedModalOpen] = useState(false)
-  const [confirmOpen, setConfirmOpen] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longFiredRef = useRef(false)
 
@@ -247,11 +187,12 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
   }, [id, setComponentCmd])
 
   const handleToggle = useCallback(() => {
-    if (cmd) { doStop(); return }            // turning OFF — always immediate
+    // A tap STOPS anything that is commanded-on OR still running, so a second
+    // tap during the stop's settle window can't accidentally restart it.
+    if (cmd || running) { doStop(); return }
     if (locked) return                        // licence lock blocks STARTS only
-    if (CONFIRM_START_IDS.has(id)) { setConfirmOpen(true); return }
     doStart()
-  }, [id, cmd, locked, doStart, doStop])
+  }, [cmd, running, locked, doStart, doStop])
 
   const handleSpeedSave = useCallback((newHz: number) => {
     api.sendSpeed({ id, value_pct: hzToPct(newHz) }).catch(() => {})
@@ -280,14 +221,17 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
 
   const startDisabled = locked && !cmd
 
-  // Border / background follow the derived state (fault > running > commanded > off)
+  // Border / background follow the derived state. STOPPING flashes red (instant
+  // feedback on a stop tap) then settles to dark 'off' once it actually stops.
   const borderColor =
     state === 'faulted' ? '#dc2626'
+    : state === 'stopping' ? '#dc2626'
     : state === 'running' ? '#059669'
     : state === 'commanded' ? '#d97706'
     : '#1f2937'
   const cardBg =
     state === 'faulted' ? '#1a0505'
+    : state === 'stopping' ? '#1a0505'
     : state === 'running' ? '#0a1f0f'
     : state === 'commanded' ? '#1a0e00'
     : '#111827'
@@ -300,6 +244,7 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
     off:       { text: 'STOP',        fg: '#6b7280', bd: '#374151', bgc: 'rgba(107,114,128,0.10)', pulse: false },
     commanded: { text: 'STARTING…',   fg: '#fcd34d', bd: '#b45309', bgc: 'rgba(217,119,6,0.14)',   pulse: true  },
     running:   { text: 'RUNNING',     fg: '#6ee7b7', bd: '#059669', bgc: 'rgba(16,185,129,0.12)',  pulse: false },
+    stopping:  { text: 'STOPPING…',   fg: '#fecaca', bd: '#dc2626', bgc: 'rgba(220,38,38,0.16)',   pulse: true  },
     faulted:   { text: 'FAULT',       fg: '#fecaca', bd: '#dc2626', bgc: 'rgba(220,38,38,0.16)',   pulse: true  },
   }[state]
 
@@ -359,7 +304,7 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
         {manual ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
             <span style={{
-              fontSize: state === 'commanded' ? '36px' : '44px', fontWeight: 800,
+              fontSize: state === 'commanded' || state === 'stopping' ? '36px' : '44px', fontWeight: 800,
               letterSpacing: '0.04em', textTransform: 'uppercase',
               color: badge.fg, userSelect: 'none', lineHeight: 1,
               padding: '10px 24px', borderRadius: '14px',
@@ -375,7 +320,14 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
                 commanded — not&nbsp;running
               </span>
             )}
-            {has_speed && !startDisabled && state !== 'commanded' && (
+            {/* Stop tapped — still coasting down until real feedback clears */}
+            {state === 'stopping' && (
+              <span style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '0.06em',
+                textTransform: 'uppercase', color: '#f87171' }}>
+                stopping — still&nbsp;running
+              </span>
+            )}
+            {has_speed && !startDisabled && state !== 'commanded' && state !== 'stopping' && (
               <span style={{
                 fontSize: '13px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
                 color: '#4b5563', marginLeft: 'auto',
@@ -430,15 +382,6 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
           currentHz={hz}
           onSave={handleSpeedSave}
           onClose={() => setSpeedModalOpen(false)}
-        />
-      )}
-
-      {/* Confirm-start modal (high-consequence equipment) */}
-      {confirmOpen && (
-        <ConfirmStartModal
-          label={label}
-          onConfirm={doStart}
-          onClose={() => setConfirmOpen(false)}
         />
       )}
     </>
