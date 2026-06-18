@@ -237,6 +237,7 @@ async def _build_state_umas(client, settings, license_mgr=None) -> dict:
             "running":   running,
             "fault":     fault,
             "speed_pct": speed_pct,
+            "min_hz":    comp.min_hz,
         })
 
     temps = {
@@ -360,6 +361,7 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
             "running":   running,
             "fault":     fault,
             "speed_pct": speed_pct,
+            "min_hz":    comp.min_hz,
         })
 
     # Read operator setpoint registers

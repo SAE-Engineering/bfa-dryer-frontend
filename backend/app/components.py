@@ -93,6 +93,8 @@ class Component:
     speed_act_reg: Optional[int] = None  # SIM-ONLY actual-speed %MW (modbus sim)
     fault_bit: Optional[int] = None      # %M fault-latch addr that faults this component
     manual: bool = True                  # False → indicator only (no operator toggle)
+    min_hz: float = 0.0                  # HMI minimum speed (drive LSP) — operator
+                                         # cannot command below this; 0.0 = no floor
 
 
 # ---------------------------------------------------------------------------
@@ -131,10 +133,12 @@ COMPONENTS: list[Component] = [
     Component("disch_agi",   "Discharge Agitator", "vsd",    False,  1,  1),
 
     # ATV drives on the Modbus IOScanner — Hz speed setpoints %MW40-43.
-    Component("spinner",     "Spinner",            "vsd",    True,   2,  2,  speed_sp_reg=40),
-    Component("agitator1",   "Agitator 1",         "vsd",    True,   3,  3,  speed_sp_reg=41),
-    Component("agitator2",   "Agitator 2",         "vsd",    True,   9,  9,  speed_sp_reg=42),
-    Component("trace_chain", "Trace Chain",        "vsd",    True,  10, 10,  speed_sp_reg=43),
+    # min_hz = the drive's provisioned low-speed (LSP) the HMI must not go below
+    # (TC 10 Hz, Agitators 20 Hz; Spinner floored at 20 Hz per operator).
+    Component("spinner",     "Spinner",            "vsd",    True,   2,  2,  speed_sp_reg=40, min_hz=20.0),
+    Component("agitator1",   "Agitator 1",         "vsd",    True,   3,  3,  speed_sp_reg=41, min_hz=20.0),
+    Component("agitator2",   "Agitator 2",         "vsd",    True,   9,  9,  speed_sp_reg=42, min_hz=20.0),
+    Component("trace_chain", "Trace Chain",        "vsd",    True,  10, 10,  speed_sp_reg=43, min_hz=10.0),
 
     # DOL bank (Q0.4-Q0.8) — no speed.
     Component("mill",        "Mill",               "dol",    False,  4,  4),

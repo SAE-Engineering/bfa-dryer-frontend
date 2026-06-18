@@ -13,6 +13,7 @@ export interface Component {
   running: boolean
   fault: boolean
   speed_pct: number   // 0.0–100.0; valid only when has_speed === true
+  min_hz?: number     // drive minimum speed (LSP) in Hz; HMI won't command below it
 }
 
 export interface Temps {

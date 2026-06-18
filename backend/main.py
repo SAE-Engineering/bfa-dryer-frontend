@@ -24,6 +24,7 @@ from app.poll_loop import poll_loop, get_latest_state
 from app.logging_task import logging_task
 from app.license import LicenseManager
 from app import plc_gate
+from app import persistence
 from config import Settings
 
 logging.basicConfig(level=logging.INFO)
@@ -86,6 +87,10 @@ async def lifespan(app: FastAPI):
             unit_id=settings.MODBUS_UNIT_ID,
         )
         await plc_client.connect()
+
+    # Restore persisted operator setpoints (speed + burner) into the register
+    # bank / PLC so the last-set values survive a restart / power cycle.
+    await persistence.restore(plc_client)
 
     # Background tasks
     poll_task = asyncio.create_task(
@@ -208,10 +213,15 @@ async def set_speed(req: SpeedRequest):
     # drive speed words %MW40-43 as Hz (0-50), so a 'hz' setpoint maps 0-100 % →
     # 0-50 Hz; the hot-fan %MW44 ('pct', display-only) stays 0-100.
     raw = speed_pct_to_raw(req.value_pct, comp.speed_unit)
+    # Enforce the drive's minimum speed (LSP) as a hard floor — defence in depth
+    # behind the HMI clamp, so even a direct API call can't command below it.
+    if comp.speed_unit == "hz" and comp.min_hz > 0:
+        raw = max(raw, int(round(comp.min_hz)))
     ok = await plc_client.write_register(comp.speed_sp_reg, raw)
     if not ok:
         raise HTTPException(status_code=502, detail="PLC write failed")
 
+    persistence.save_reg(comp.speed_sp_reg, raw)   # survive restart / power cycle
     return {"ok": True, "id": req.id, "value_pct": req.value_pct,
             "raw": raw, "unit": comp.speed_unit}
 
@@ -224,6 +234,7 @@ async def burner_setpoint(req: BurnerSetpointRequest):
     if not ok:
         raise HTTPException(status_code=502, detail="PLC write failed")
 
+    persistence.save_reg(REG_BURNER_SP, raw)       # survive restart / power cycle
     return {"ok": True, "celsius": req.celsius, "raw": raw}
 
 
@@ -248,6 +259,7 @@ async def set_operator_setpoint(req: SetpointRequest):
     if not ok:
         raise HTTPException(status_code=502, detail="PLC write failed")
 
+    persistence.save_reg(reg, raw)                 # survive restart / power cycle
     return {"ok": True, "key": req.key, "value_c": round(raw / 10.0, 1), "raw": raw}
 
 

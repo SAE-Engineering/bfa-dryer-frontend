@@ -39,15 +39,17 @@ const hzToPct = (hz: number) => (hz / MAX_HZ) * 100
 interface SpeedModalProps {
   label: string
   currentHz: number
+  minHz: number
   onSave: (hz: number) => void
   onClose: () => void
 }
 
-const SpeedModal = ({ label, currentHz, onSave, onClose }: SpeedModalProps) => {
-  const [value, setValue] = useState(Math.round(currentHz)) // whole-Hz setpoint
+const SpeedModal = ({ label, currentHz, minHz, onSave, onClose }: SpeedModalProps) => {
+  // Never start below the drive's minimum (LSP) — the operator can't go under it.
+  const [value, setValue] = useState(Math.max(minHz, Math.round(currentHz)))
 
   const adjust = (delta: number) => {
-    setValue((prev) => Math.max(0, Math.min(MAX_HZ, prev + delta)))
+    setValue((prev) => Math.max(minHz, Math.min(MAX_HZ, prev + delta)))
   }
 
   const handleSave = () => {
@@ -98,8 +100,14 @@ const SpeedModal = ({ label, currentHz, onSave, onClose }: SpeedModalProps) => {
           <span style={{
             fontSize: '15px', fontWeight: 700, letterSpacing: '0.08em',
             textTransform: 'uppercase', color: '#9ca3af',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
           }}>
-            Speed Setpoint
+            <span>Speed Setpoint</span>
+            {minHz > 0 && (
+              <span style={{ color: '#6b7280', fontWeight: 600, letterSpacing: '0.04em' }}>
+                min {minHz.toFixed(1)} Hz
+              </span>
+            )}
           </span>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
@@ -167,7 +175,7 @@ function deriveState(cmd: boolean, running: boolean, fault: boolean): DrvState {
 
 export const ComponentTile = ({ component, locked = false }: ComponentTileProps) => {
   const setComponentCmd = useControlStore((s) => s.setComponentCmd)
-  const { id, label, has_speed, manual, cmd, running, fault, speed_pct } = component
+  const { id, label, has_speed, manual, cmd, running, fault, speed_pct, min_hz = 0 } = component
 
   const [speedModalOpen, setSpeedModalOpen] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -380,6 +388,7 @@ export const ComponentTile = ({ component, locked = false }: ComponentTileProps)
         <SpeedModal
           label={label}
           currentHz={hz}
+          minHz={min_hz}
           onSave={handleSpeedSave}
           onClose={() => setSpeedModalOpen(false)}
         />
