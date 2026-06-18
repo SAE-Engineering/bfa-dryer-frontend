@@ -358,6 +358,10 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
                 speed_pct = round(min(100.0, hz / 50.0 * 100.0), 1)   # Hz → %
             else:
                 speed_pct = round(min(100.0, float(raw)), 1)          # already %
+        # Maintenance mode (soft-lockout): the trace chain runs at a fixed 50 Hz
+        # (no speed control) — override the display without touching the setpoint.
+        if getattr(client, "soft_lock", False) and comp.id == "trace_chain":
+            speed_pct = 100.0
 
         components.append({
             "id":        comp.id,
@@ -391,6 +395,7 @@ async def _build_state_modbus(client, settings, license_mgr=None) -> dict:
         "main_on":    getattr(client, "main_on", True),         # main switch (sim input)
         "soft_lock":  getattr(client, "soft_lock", False),      # soft-lockout (sim input)
         "estop":      getattr(client, "estop_latched", False),  # latched e-stop (sim)
+        "estop_input":getattr(client, "estop_input", False),    # e-stop input held (sim)
         "released":   plc_gate.is_released(),
         "sim":        settings.PLC_SIM,
         "safety_ok":  safety_ok,

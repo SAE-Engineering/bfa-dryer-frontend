@@ -242,9 +242,9 @@ class SimulatedPlcClient:
 
     # ---- SIM-ONLY input injection ------------------------------------------
     _FAULT_BITS = {"fire": M_FIRE_TRIP, "over_temp": M_OVER_TEMP, "scorch": M_SCORCH}
-    # %MW20 status bits forced off by soft-lockout (= outputs gated on %M0):
-    #   disch_agi(1), mill(4), disch_conv(5), load_conv(6), brush(7), shaker(8), burner(11)
-    _M0_GATED_MASK = (1 << 1) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 8) | (1 << 11)
+    # Soft-lockout = MAINTENANCE MODE: only Hot Fan (bit 0) + Trace Chain (bit 10)
+    # may run; every OTHER output (bits 1-9,11,12) is forced off and uncommanded.
+    _SOFTLOCK_OFF_MASK = 0x1FFF & ~((1 << 0) | (1 << 10))   # = 0x1BFE
 
     def set_estop(self, on: bool) -> None:
         # Engaging the e-stop LATCHES it; releasing the input alone does NOT clear
@@ -261,8 +261,9 @@ class SimulatedPlcClient:
         self._softlock = bool(on)
 
     def reset(self) -> None:
-        # Reset pushbutton — clears the latched e-stop and the fault latches.
-        # If the e-stop input is still engaged it re-latches on the next tick.
+        # Reset pushbutton — fully clears: releases the e-stop input, clears the
+        # latch and the fault latches. One press returns everything to OFF.
+        self._estop = False
         self._estop_latch = False
         self._inject_faults.clear()
 
@@ -277,6 +278,10 @@ class SimulatedPlcClient:
     @property
     def estop_latched(self) -> bool:
         return self._estop_latch
+
+    @property
+    def estop_input(self) -> bool:
+        return self._estop
 
     def set_commloss(self, on: bool) -> None:
         # Comms drop ⇒ the link is "down": state builder reports connected=False.
@@ -461,10 +466,11 @@ class SimulatedPlcClient:
                 word20 &= ~(1 << 13)
             # Safety OK (bit 14) — engaged unless E-STOP is held
             word20 |= (1 << 14)
-            # Soft-lockout (%I0.10 low): force the %M0-gated outputs OFF (burner +
-            # DOL bank + discharge agitator). VSDs run on their own permits → unaffected.
+            # Soft-lockout = maintenance mode: force every output OFF except Hot
+            # Fan + Trace Chain, and uncommand them so they stay off on exit.
             if self._softlock:
-                word20 &= ~self._M0_GATED_MASK
+                word20 &= ~self._SOFTLOCK_OFF_MASK
+                self._regs[0] &= ~self._SOFTLOCK_OFF_MASK
             self._regs[20] = word20 & 0xFFFF
 
         # Ramp actual speeds toward setpoints

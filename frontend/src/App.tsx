@@ -6,6 +6,7 @@ import { LicenseBanner } from "./components/LicenseBanner"
 import { Dashboard } from "./components/Dashboard"
 import { CommLossOverlay } from "./components/CommLossOverlay"
 import { EstopOverlay } from "./components/EstopOverlay"
+import { SoftLockOverlay } from "./components/SoftLockOverlay"
 import { PoweredOffOverlay } from "./components/PoweredOffOverlay"
 import { DiagScreen } from "./components/DiagScreen"
 import { DiagPinGate } from "./components/DiagPinGate"
@@ -58,6 +59,8 @@ function App() {
       <CommLossOverlay />
       {/* Latched E-STOP warning triangle (clears only on reset) */}
       <EstopOverlay />
+      {/* Soft-lockout maintenance popup (trace chain + hot fan only) */}
+      <SoftLockOverlay />
       {/* Black "screen off" when the main switch is off (above everything) */}
       <PoweredOffOverlay />
     </div>
